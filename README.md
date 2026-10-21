@@ -325,3 +325,29 @@ This section records verified platform constraints before implementation. The ba
 - Do not remove authentication or expose command execution publicly to work around client limitations.
 
 These findings describe the published product documentation at the date above; ChatGPT plans and app support can change, so re-check the official guidance when setting up the final integration.
+
+
+## 14. Phase 1 implementation progress
+
+### Task: authenticated MCP server and command runner
+
+The first implementation slice adds the Python server entry point, a Streamable HTTP MCP app, a bearer-token ASGI middleware, a bounded shell executor, and automated tests. The HTTP middleware checks every HTTP request before it reaches the MCP application. Missing or invalid tokens receive HTTP 401; the middleware uses constant-time token comparison.
+
+The initial `run_command` tool accepts a command, an optional workspace-relative directory, and an optional timeout. It returns stdout, stderr, exit status, timeout state, truncation state, and elapsed time. The executor rejects empty commands, invalid timeouts, and working directories outside the configured workspace. Output is bounded by configuration.
+
+**Security boundary:** the workspace check constrains the process working directory, not every filesystem operation a shell command can perform. Shell commands can still read or modify anything the operating-system identity can access. Run this service in a dedicated account/container with limited credentials and expose it remotely only over HTTPS.
+
+### Local development
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+export MCP_AUTH_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export REMOTE_CODING_AGENT_WORKSPACE="$PWD/workspace"
+remote-coding-agent
+```
+
+The MCP endpoint is served at `/mcp`. For a direct local smoke test, send the configured token as `Authorization: Bearer <token>` using a compatible MCP client. Do not expose the default local bind address directly to the internet; configure the bind host appropriately when running in Docker or behind a tunnel.
+
+Automated checks run through GitHub Actions on pushes to `main` and pull requests.

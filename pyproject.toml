@@ -21,7 +21,8 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-  "mcp>=2.0,<3.0",
+  "mcp>=1.28,<2.0",
+  "uvicorn>=0.30,<1.0",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +31,9 @@ dev = [
   "pytest-cov>=6.0,<7.0",
   "ruff>=0.11,<1.0",
 ]
+
+[project.scripts]
+remote-coding-agent = "remote_coding_agent.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/remote_coding_agent"]
