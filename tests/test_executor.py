@@ -18,6 +18,7 @@ def run(command: str, workspace: Path, **kwargs):
             timeout_seconds=kwargs.pop("timeout_seconds", 2),
             max_timeout_seconds=kwargs.pop("max_timeout_seconds", 5),
             max_output_chars=kwargs.pop("max_output_chars", 1000),
+            max_command_chars=kwargs.pop("max_command_chars", 16_384),
             **kwargs,
         )
     )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
         host=settings.host,
         port=settings.port,
     )
+    execution_slots = asyncio.Semaphore(settings.max_concurrent_commands)
 
     @mcp.tool()
     async def run_command(
@@ -48,6 +50,32 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
             if timeout_seconds is None
             else timeout_seconds
         )
+        if not isinstance(command, str) or len(command) > settings.max_command_chars:
+            return {
+                "command": "",
+                "stdout": "",
+                "stderr": (
+                    "command must be a string no longer than "
+                    f"{settings.max_command_chars} characters"
+                ),
+                "exit_code": 2,
+                "timed_out": False,
+                "output_truncated": False,
+                "duration_seconds": 0.0,
+            }
+
+        if execution_slots.locked():
+            return {
+                "command": command,
+                "stdout": "",
+                "stderr": "server is busy; retry after a running command finishes",
+                "exit_code": 75,
+                "timed_out": False,
+                "output_truncated": False,
+                "duration_seconds": 0.0,
+            }
+
+        await execution_slots.acquire()
         try:
             return await execute_command(
                 command=command,
@@ -56,6 +84,7 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
                 timeout_seconds=timeout,
                 max_timeout_seconds=settings.max_timeout_seconds,
                 max_output_chars=settings.max_output_chars,
+                max_command_chars=settings.max_command_chars,
             )
         except CommandExecutionError as exc:
             return {
@@ -67,7 +96,8 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
                 "output_truncated": False,
                 "duration_seconds": 0.0,
             }
-
+        finally:
+            execution_slots.release()
 
     app = BearerTokenMiddleware(mcp.streamable_http_app(), settings.auth_token)
     return mcp, app

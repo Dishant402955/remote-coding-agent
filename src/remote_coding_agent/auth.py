@@ -24,15 +24,13 @@ def token_matches(authorization: str | None, expected_token: str) -> bool:
     scheme, separator, supplied_token = authorization.partition(" ")
     if not separator or scheme.lower() != "bearer" or not supplied_token:
         return False
-    return hmac.compare_digest(supplied_token.encode("utf-8"), expected_token.encode("utf-8"))
+    return hmac.compare_digest(
+        supplied_token.encode("utf-8"), expected_token.encode("utf-8")
+    )
 
 
 class BearerTokenMiddleware:
-    """Require a static bearer token for every HTTP request handled by the wrapped app.
-
-    This is a simple shared-secret gate, not an OAuth authorization server. Keep the
-    endpoint behind HTTPS when remote, and never use this middleware for stdio transport.
-    """
+    """Require one valid bearer credential for every HTTP request."""
 
     def __init__(self, app: ASGIApp, expected_token: str) -> None:
         if not expected_token:
@@ -50,15 +48,17 @@ class BearerTokenMiddleware:
             await self.app(scope, receive, send)
             return
 
-        authorization = next(
-            (
-                value.decode("latin-1")
-                for key, value in scope.get("headers", [])
-                if key.lower() == b"authorization"
-            ),
-            None,
-        )
-        if token_matches(authorization, self.expected_token):
+        authorization_headers = [
+            value.decode("latin-1")
+            for key, value in scope.get("headers", [])
+            if key.lower() == b"authorization"
+        ]
+        # Reject duplicates rather than relying on proxy/server-specific header
+        # merging rules that can disagree about which credential is authoritative.
+        if (
+            len(authorization_headers) == 1
+            and token_matches(authorization_headers[0], self.expected_token)
+        ):
             await self.app(scope, receive, send)
             return
 

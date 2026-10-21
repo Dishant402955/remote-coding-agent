@@ -8,7 +8,7 @@ from starlette.testclient import TestClient
 from remote_coding_agent.config import Settings
 from remote_coding_agent.server import create_server
 
-AUTH_TOKEN = "integration-test-secret"
+AUTH_TOKEN = "integration-test-secret-with-more-than-32-characters"
 PROTOCOL_VERSION = "2025-03-26"
 
 

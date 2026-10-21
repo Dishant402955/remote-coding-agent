@@ -4,10 +4,32 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import signal
 import time
 from pathlib import Path
 from typing import Any
+
+
+_SECRET_ENV_NAME = re.compile(
+    r"(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_KEY|PRIVATE_KEY|ACCESS_KEY|AUTHORIZATION)",
+    re.IGNORECASE,
+)
+
+
+def _command_environment() -> dict[str, str]:
+    """Avoid passing common credential-bearing environment variables to shell code."""
+    excluded = {
+        "GIT_ASKPASS",
+        "SSH_ASKPASS",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_PARAMETERS",
+    }
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name not in excluded and not _SECRET_ENV_NAME.search(name)
+    }
 
 
 class CommandExecutionError(ValueError):
@@ -104,11 +126,16 @@ async def execute_command(
     timeout_seconds: int,
     max_timeout_seconds: int,
     max_output_chars: int,
+    max_command_chars: int = 16_384,
     working_directory: str | None = None,
 ) -> dict[str, Any]:
     """Run a shell command with a bounded timeout and bounded output memory."""
     if not command or not command.strip():
         raise CommandExecutionError("command must not be empty")
+    if len(command) > max_command_chars:
+        raise CommandExecutionError(
+            f"command cannot exceed {max_command_chars} characters"
+        )
     if timeout_seconds < 1:
         raise CommandExecutionError("timeout_seconds must be greater than zero")
     if timeout_seconds > max_timeout_seconds:
@@ -126,6 +153,7 @@ async def execute_command(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         start_new_session=(os.name == "posix"),
+        env=_command_environment(),
     )
     assert process.stdout is not None
     assert process.stderr is not None

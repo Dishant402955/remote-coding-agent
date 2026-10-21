@@ -45,6 +45,34 @@ def test_middleware_rejects_request_before_calling_app() -> None:
     assert json.loads(sent[1]["body"])["error"] == "unauthorized"
 
 
+def test_middleware_rejects_duplicate_authorization_headers() -> None:
+    called = False
+    sent = []
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp",
+        "headers": [
+            (b"authorization", b"Bearer secret-token"),
+            (b"authorization", b"Bearer attacker-token"),
+        ],
+    }
+    asyncio.run(BearerTokenMiddleware(app, "secret-token")(scope, receive, send))
+    assert not called
+    assert sent[0]["status"] == 401
+
+
 def test_middleware_allows_valid_token() -> None:
     called = False
 
