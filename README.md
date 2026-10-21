@@ -351,3 +351,17 @@ remote-coding-agent
 The MCP endpoint is served at `/mcp`. For a direct local smoke test, send the configured token as `Authorization: Bearer <token>` using a compatible MCP client. Do not expose the default local bind address directly to the internet; configure the bind host appropriately when running in Docker or behind a tunnel.
 
 Automated checks run through GitHub Actions on pushes to `main` and pull requests.
+
+
+## 15. MCP HTTP integration checks
+
+The integration suite exercises the actual Streamable HTTP endpoint using the Starlette test client and the configured MCP application lifespan. It verifies that missing and invalid bearer tokens are rejected before MCP initialization, then initializes a session using a valid token and calls `run_command` through JSON-RPC.
+
+Run the full suite locally with:
+
+```bash
+pip install -e '.[dev]'
+pytest
+```
+
+These tests validate the in-process HTTP application and protocol flow. They do not prove that a particular ChatGPT custom integration supports sending the required Authorization header; that compatibility must be verified when connecting the deployed endpoint.
