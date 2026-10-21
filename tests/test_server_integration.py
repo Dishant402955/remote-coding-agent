@@ -100,6 +100,28 @@ def test_mcp_http_initializes_and_runs_command_with_valid_token(tmp_path) -> Non
         assert initialize_result["result"]["serverInfo"]["name"] == "Remote Coding Agent"
         negotiated_version = initialize_result["result"]["protocolVersion"]
 
+        blocked_file = tmp_path / "unauthorized-command-ran"
+        unauthorized_tool_call = client.post(
+            "/mcp",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "MCP-Session-Id": session_id,
+                "MCP-Protocol-Version": negotiated_version,
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": 99,
+                "method": "tools/call",
+                "params": {
+                    "name": "run_command",
+                    "arguments": {"command": f"touch {blocked_file}"},
+                },
+            },
+        )
+        assert unauthorized_tool_call.status_code == 401
+        assert not blocked_file.exists()
+
         tool_response = client.post(
             "/mcp",
             headers={

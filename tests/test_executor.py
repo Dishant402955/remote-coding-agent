@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import shlex
 import time
 from pathlib import Path
 
@@ -113,3 +114,27 @@ def test_child_process_does_not_receive_secret_environment(
 def test_result_does_not_echo_the_command(tmp_path: Path) -> None:
     result = run("printf safe-output", tmp_path)
     assert "command" not in result
+
+
+def test_cancellation_terminates_running_command(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        marker = tmp_path / "command-started"
+        command = f"printf started > {shlex.quote(str(marker))}; sleep 10"
+        task = asyncio.create_task(
+            execute_command(
+                command=command,
+                workspace=tmp_path,
+                timeout_seconds=10,
+                max_timeout_seconds=10,
+                max_output_chars=100,
+            )
+        )
+        deadline = time.monotonic() + 3
+        while not marker.exists() and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+        assert marker.exists(), "command did not start in time"
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=3)
+
+    asyncio.run(scenario())
