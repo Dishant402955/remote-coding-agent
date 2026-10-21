@@ -51,7 +51,7 @@ def _initialize(client: TestClient):
 def test_mcp_http_rejects_missing_and_invalid_tokens(tmp_path) -> None:
     _, app = create_server(Settings(auth_token=AUTH_TOKEN, workspace=tmp_path))
 
-    with TestClient(app, base_url="http://127.0.0.1") as client:
+    with TestClient(app, base_url="http://127.0.0.1:8000") as client:
         payload = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -90,7 +90,7 @@ def test_mcp_http_initializes_and_runs_command_with_valid_token(tmp_path) -> Non
         )
     )
 
-    with TestClient(app, base_url="http://127.0.0.1") as client:
+    with TestClient(app, base_url="http://127.0.0.1:8000") as client:
         initialized = _initialize(client)
         assert initialized.status_code == 200, initialized.text
         session_id = initialized.headers.get("mcp-session-id")
