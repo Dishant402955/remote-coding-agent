@@ -192,7 +192,6 @@ async def execute_command(
     stdout, stderr, output_limited = _limit_output(stdout, stderr, max_output_chars)
 
     return {
-        "command": command,
         "working_directory": str(cwd),
         "stdout": stdout,
         "stderr": stderr,

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,17 @@ from remote_coding_agent.config import Settings
 from remote_coding_agent.executor import CommandExecutionError, execute_command
 
 logger = logging.getLogger("remote_coding_agent")
+
+
+def _disable_linux_process_inspection() -> None:
+    """Prevent same-UID processes from reading this server's memory/environment on Linux."""
+    if not sys.platform.startswith("linux"):
+        return
+    libc = ctypes.CDLL(None, use_errno=True)
+    # Linux PR_SET_DUMPABLE=4; zero disables ptrace-based inspection and core dumps.
+    if libc.prctl(4, 0, 0, 0, 0) != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, "could not disable Linux process inspection")
 
 
 def create_server(settings: Settings) -> tuple[FastMCP, Any]:
@@ -52,7 +65,6 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
         )
         if not isinstance(command, str) or len(command) > settings.max_command_chars:
             return {
-                "command": "",
                 "stdout": "",
                 "stderr": (
                     "command must be a string no longer than "
@@ -66,7 +78,6 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
 
         if execution_slots.locked():
             return {
-                "command": command,
                 "stdout": "",
                 "stderr": "server is busy; retry after a running command finishes",
                 "exit_code": 75,
@@ -109,6 +120,7 @@ def main() -> None:
     """Load configuration and serve the MCP endpoint over Streamable HTTP."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     settings = Settings.from_env()
+    _disable_linux_process_inspection()
     _, app = create_server(settings)
     uvicorn.run(app, host=settings.host, port=settings.port, log_level="info")
 

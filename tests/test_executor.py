@@ -108,3 +108,8 @@ def test_child_process_does_not_receive_secret_environment(
         tmp_path,
     )
     assert result["stdout"] == "||visible"
+
+
+def test_result_does_not_echo_the_command(tmp_path: Path) -> None:
+    result = run("printf safe-output", tmp_path)
+    assert "command" not in result
