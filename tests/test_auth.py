@@ -94,3 +94,64 @@ def test_middleware_allows_valid_token() -> None:
     }
     asyncio.run(BearerTokenMiddleware(app, "secret-token")(scope, receive, send))
     assert called
+
+
+def test_middleware_rejects_oversized_content_length() -> None:
+    sent = []
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    async def receive():
+        raise AssertionError("oversized body should be rejected before reading")
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp",
+        "headers": [
+            (b"authorization", b"Bearer secret-token"),
+            (b"content-length", b"99"),
+        ],
+    }
+    middleware = BearerTokenMiddleware(app, "secret-token", max_request_bytes=8)
+    asyncio.run(middleware(scope, receive, send))
+    assert not called
+    assert sent[0]["status"] == 413
+
+
+def test_middleware_rejects_oversized_chunked_body() -> None:
+    sent = []
+    called = False
+    messages = iter(
+        [
+            {"type": "http.request", "body": b"12345", "more_body": True},
+            {"type": "http.request", "body": b"67890", "more_body": False},
+        ]
+    )
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    async def receive():
+        return next(messages)
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp",
+        "headers": [(b"authorization", b"Bearer secret-token")],
+    }
+    middleware = BearerTokenMiddleware(app, "secret-token", max_request_bytes=8)
+    asyncio.run(middleware(scope, receive, send))
+    assert not called
+    assert sent[0]["status"] == 413

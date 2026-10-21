@@ -99,7 +99,9 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
         finally:
             execution_slots.release()
 
-    app = BearerTokenMiddleware(mcp.streamable_http_app(), settings.auth_token)
+    app = BearerTokenMiddleware(
+        mcp.streamable_http_app(), settings.auth_token, settings.max_request_bytes
+    )
     return mcp, app
 
 

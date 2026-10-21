@@ -36,6 +36,7 @@ def test_valid_environment_uses_safe_defaults(monkeypatch: pytest.MonkeyPatch) -
         "REMOTE_CODING_AGENT_MAX_OUTPUT_CHARS",
         "REMOTE_CODING_AGENT_MAX_COMMAND_CHARS",
         "REMOTE_CODING_AGENT_MAX_CONCURRENT_COMMANDS",
+        "REMOTE_CODING_AGENT_MAX_REQUEST_BYTES",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -48,6 +49,7 @@ def test_valid_environment_uses_safe_defaults(monkeypatch: pytest.MonkeyPatch) -
     assert settings.max_output_chars == 20_000
     assert settings.max_command_chars == 16_384
     assert settings.max_concurrent_commands == 4
+    assert settings.max_request_bytes == 1_048_576
 
 
 @pytest.mark.parametrize("port", ["0", "-1", "65536", "not-a-port"])
@@ -73,6 +75,7 @@ def test_default_timeout_cannot_exceed_maximum(monkeypatch: pytest.MonkeyPatch) 
         ("max_command_chars", 65_537),
         ("max_concurrent_commands", 17),
         ("max_timeout_seconds", 3601),
+        ("max_request_bytes", 10_485_761),
     ],
 )
 def test_direct_settings_construction_is_validated(field, value) -> None:

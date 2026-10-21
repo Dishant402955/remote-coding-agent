@@ -52,6 +52,7 @@ All settings are read from environment variables. The MCP token is required; use
 | `REMOTE_CODING_AGENT_MAX_OUTPUT_CHARS` | `20000` | Maximum combined returned output, capped at 1000000 |
 | `REMOTE_CODING_AGENT_MAX_COMMAND_CHARS` | `16384` | Maximum command string length, capped at 65536 |
 | `REMOTE_CODING_AGENT_MAX_CONCURRENT_COMMANDS` | `4` | Concurrent commands, configurable from 1 to 16 |
+| `REMOTE_CODING_AGENT_MAX_REQUEST_BYTES` | `1048576` | Request body limit, configurable from 1 to 10485760 bytes |
 
 ## Development and checks
 

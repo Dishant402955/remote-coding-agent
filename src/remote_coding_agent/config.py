@@ -36,6 +36,7 @@ class Settings:
     max_output_chars: int = 20_000
     max_command_chars: int = 16_384
     max_concurrent_commands: int = 4
+    max_request_bytes: int = 1_048_576
 
     def __post_init__(self) -> None:
         token = self.auth_token.strip() if isinstance(self.auth_token, str) else ""
@@ -63,6 +64,8 @@ class Settings:
             raise ConfigurationError("max_command_chars must be between 1 and 65536")
         if not 1 <= self.max_concurrent_commands <= 16:
             raise ConfigurationError("max_concurrent_commands must be between 1 and 16")
+        if not 1 <= self.max_request_bytes <= 10_485_760:
+            raise ConfigurationError("max_request_bytes must be between 1 and 10485760")
         object.__setattr__(self, "auth_token", token)
         object.__setattr__(self, "workspace", Path(self.workspace).expanduser())
 
@@ -104,6 +107,11 @@ class Settings:
             os.getenv("REMOTE_CODING_AGENT_MAX_CONCURRENT_COMMANDS"),
             4,
         )
+        max_request_bytes = _positive_int(
+            "REMOTE_CODING_AGENT_MAX_REQUEST_BYTES",
+            os.getenv("REMOTE_CODING_AGENT_MAX_REQUEST_BYTES"),
+            1_048_576,
+        )
         workspace = Path(
             os.getenv("REMOTE_CODING_AGENT_WORKSPACE", "./workspace")
         ).expanduser()
@@ -118,4 +126,5 @@ class Settings:
             max_output_chars=max_output,
             max_command_chars=max_command,
             max_concurrent_commands=max_concurrent,
+            max_request_bytes=max_request_bytes,
         )
