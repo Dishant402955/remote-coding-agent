@@ -188,13 +188,13 @@ Colab is an optional, temporary path for testing. It is not a reliable persisten
 1. Open [the Colab notebook](notebooks/remote_coding_agent_colab.ipynb).
 2. Add `MCP_AUTH_TOKEN` to Colab Secrets. Generate a separate high-entropy value; do not reuse a GitHub credential.
 3. Add `GITHUB_TOKEN` only if you need to clone a private repository. Use the minimum repository permissions and an expiry. The notebook uses it for the clone/pull step and does not intentionally forward it to the server process.
-4. Run the notebook cells from top to bottom. The notebook installs dependencies, obtains the code, verifies the downloaded `cloudflared` package digest against release metadata, starts the server and temporary tunnel, and performs a local MCP initialization and `run_command` smoke test.
+4. Run the notebook cells from top to bottom. The notebook installs dependencies, obtains the code, verifies the downloaded `cloudflared` package digest against release metadata, starts the server and temporary tunnel, and tests authentication, MCP initialization, a harmless `run_command`, and an authenticated initialization through the public tunnel.
 5. Copy the printed HTTPS URL ending in `/mcp` into a compatible MCP client and configure the bearer header. Never put the token in the URL.
 6. Run the notebook cleanup cell before ending the session.
 
 The tunnel URL is public and temporary, and the Colab runtime may reset at any time. Environment filtering is not a full sandbox: commands can access files and OS resources allowed to the Colab runtime identity. Do not use this path with sensitive source code, production credentials, or valuable GitHub tokens.
 
-The notebook verifies the local service, not a public tunnel round-trip or compatibility with ChatGPT. Perform a real connection test with the exact client you intend to use.
+The notebook verifies a local tool call and an authenticated public-tunnel initialization, but does not verify compatibility with ChatGPT. Perform a real connection test with the exact client you intend to use.
 
 ## 7. Configuration reference
 
