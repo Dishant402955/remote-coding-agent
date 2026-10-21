@@ -9,7 +9,7 @@ import time
 import httpx
 
 ENDPOINT = os.getenv(
-    "REMOTE_CODING_AGENT_URL", "http://127.0.0.1:18000/mcp"
+    "REMOTE_CODING_AGENT_URL", "http://127.0.0.1:8000/mcp"
 )
 TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
 PROTOCOL_VERSION = "2025-03-26"
