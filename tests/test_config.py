@@ -81,3 +81,13 @@ def test_default_timeout_cannot_exceed_maximum(monkeypatch: pytest.MonkeyPatch) 
 def test_direct_settings_construction_is_validated(field, value) -> None:
     with pytest.raises(ConfigurationError):
         Settings(**{"auth_token": TEST_TOKEN, field: value})
+
+
+def test_direct_settings_rejects_non_integer_limits() -> None:
+    with pytest.raises(ConfigurationError, match="max_output_chars must be an integer"):
+        Settings(auth_token=TEST_TOKEN, max_output_chars=10.5)
+
+
+def test_direct_settings_rejects_non_string_host() -> None:
+    with pytest.raises(ConfigurationError, match="HOST must not be empty"):
+        Settings(auth_token=TEST_TOKEN, host=123)

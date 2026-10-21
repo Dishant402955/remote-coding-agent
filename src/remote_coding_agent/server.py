@@ -107,6 +107,16 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
                 "output_truncated": False,
                 "duration_seconds": 0.0,
             }
+        except OSError as exc:
+            logger.warning("Command execution failed (%s)", type(exc).__name__)
+            return {
+                "stdout": "",
+                "stderr": f"command execution failed: {type(exc).__name__}",
+                "exit_code": 126,
+                "timed_out": False,
+                "output_truncated": False,
+                "duration_seconds": 0.0,
+            }
         finally:
             execution_slots.release()
 

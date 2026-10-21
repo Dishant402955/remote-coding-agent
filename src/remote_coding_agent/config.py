@@ -44,12 +44,22 @@ class Settings:
             raise ConfigurationError(
                 "MCP_AUTH_TOKEN must contain at least 32 characters of secret material"
             )
-        if not self.host or not self.host.strip():
+        if not isinstance(self.host, str) or not self.host.strip():
             raise ConfigurationError("REMOTE_CODING_AGENT_HOST must not be empty")
         if not isinstance(self.port, int) or isinstance(self.port, bool):
             raise ConfigurationError("REMOTE_CODING_AGENT_PORT must be an integer")
         if not 1 <= self.port <= 65535:
             raise ConfigurationError("REMOTE_CODING_AGENT_PORT must be between 1 and 65535")
+        for name, value in (
+            ("default_timeout_seconds", self.default_timeout_seconds),
+            ("max_timeout_seconds", self.max_timeout_seconds),
+            ("max_output_chars", self.max_output_chars),
+            ("max_command_chars", self.max_command_chars),
+            ("max_concurrent_commands", self.max_concurrent_commands),
+            ("max_request_bytes", self.max_request_bytes),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ConfigurationError(f"{name} must be an integer")
         if self.default_timeout_seconds < 1 or self.max_timeout_seconds < 1:
             raise ConfigurationError("command timeouts must be greater than zero")
         if self.max_timeout_seconds > 3600:
