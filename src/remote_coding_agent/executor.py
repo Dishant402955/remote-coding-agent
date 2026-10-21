@@ -10,7 +10,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-
 _SECRET_ENV_NAME = re.compile(
     r"(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_KEY|"
     r"PRIVATE_KEY|ACCESS_KEY|AUTHORIZATION|AUTH|COOKIE|BEARER)",
