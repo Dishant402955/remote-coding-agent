@@ -23,3 +23,5 @@ jobs:
         run: uv run ruff check .
       - name: Run tests
         run: uv run pytest
+      - name: Build Docker image
+        run: docker build --tag remote-coding-agent:ci .

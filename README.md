@@ -365,3 +365,47 @@ pytest
 ```
 
 These tests validate the in-process HTTP application and protocol flow. They do not prove that a particular ChatGPT custom integration supports sending the required Authorization header; that compatibility must be verified when connecting the deployed endpoint.
+
+
+## 16. Run in Docker Compose
+
+The container image runs as an unprivileged UID, keeps its root filesystem read-only, drops Linux capabilities, disables privilege escalation, limits CPU/memory/processes, and mounts only the workspace as writable. The host port is bound to `127.0.0.1` by default. The container is not given the Docker socket or host home directory.
+
+### Start
+
+Install Docker Engine and the Docker Compose plugin, then from the repository root:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and replace the placeholder `MCP_AUTH_TOKEN` with a long random secret. Do not commit `.env`. Then create the workspace and start the service:
+
+```bash
+mkdir -p workspace
+docker compose up --build -d
+docker compose ps
+docker compose logs --tail=100 remote-coding-agent
+```
+
+On Linux, the workspace bind mount must be writable by the container's non-root UID (10001). For a new workspace directory, run `sudo chown 10001:10001 workspace` if necessary. Do not recursively change ownership of a workspace containing files whose ownership matters without checking first.
+
+The endpoint is available locally at `http://127.0.0.1:8000/mcp`. The health check confirms that the service is listening; it does not test authentication or prove an MCP client can initialize a session. Connect only from a compatible MCP client that can send `Authorization: Bearer <token>`.
+
+### Configuration
+
+- `MCP_AUTH_TOKEN`: required shared secret, supplied at runtime and never copied into the image.
+- `HOST_PORT`: optional host port; defaults to `8000`. It remains bound to loopback.
+- `REMOTE_CODING_AGENT_DEFAULT_TIMEOUT_SECONDS`: default command timeout, 30 seconds.
+- `REMOTE_CODING_AGENT_MAX_TIMEOUT_SECONDS`: maximum command timeout, 300 seconds.
+- `REMOTE_CODING_AGENT_MAX_OUTPUT_CHARS`: output limit, 20,000 characters.
+
+To choose a different host port, set `HOST_PORT=9000` in `.env`; the endpoint then listens on `http://127.0.0.1:9000/mcp`. To reach it through a tunnel, keep the local service bound to loopback and configure the tunnel to forward to the host's local port. Do not publish this command-execution service directly to the public internet.
+
+### Workspace and security notes
+
+The `./workspace` directory on the host is mounted at `/workspace` inside the container. Put a Git checkout there, or clone a repository into it using an authorized Git credential flow. Never bake GitHub tokens or other credentials into the image or repository; inject credentials at runtime only when needed, and use the narrowest practical permissions.
+
+The container reduces exposure but is not a complete sandbox against every container escape or kernel vulnerability. The agent can run arbitrary commands as UID 10001 and can read/write files in the mounted workspace. Treat commands and repositories as untrusted, keep Docker patched, and do not add host mounts, privileged mode, broad credentials, or the Docker socket.
+
+Build validation is included in GitHub Actions with `docker build`; running the image locally still requires Docker.
