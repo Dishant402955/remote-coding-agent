@@ -409,3 +409,27 @@ The `./workspace` directory on the host is mounted at `/workspace` inside the co
 The container reduces exposure but is not a complete sandbox against every container escape or kernel vulnerability. The agent can run arbitrary commands as UID 10001 and can read/write files in the mounted workspace. Treat commands and repositories as untrusted, keep Docker patched, and do not add host mounts, privileged mode, broad credentials, or the Docker socket.
 
 Build validation is included in GitHub Actions with `docker build`; running the image locally still requires Docker.
+
+
+## 17. Run in Google Colab
+
+A starter notebook is available at [`notebooks/remote_coding_agent_colab.ipynb`](notebooks/remote_coding_agent_colab.ipynb). Open it in Google Colab from GitHub and run the cells from top to bottom. It installs the project, starts the authenticated MCP server, creates a temporary Cloudflare Quick Tunnel, and prints the HTTPS endpoint.
+
+### Secrets and setup
+
+1. In Colab, open the **Secrets** panel and add `MCP_AUTH_TOKEN` with a long random value. Allow the notebook to access it. If unavailable, the notebook prompts for it without echoing the value.
+2. Add `GITHUB_TOKEN` to Colab Secrets only if you need to clone this private repository or need GitHub access. Use a fine-grained token scoped to the intended repository and minimum required permissions. The notebook prompts securely if the secret is unavailable.
+3. Run the notebook cells. The GitHub token is used for cloning without placing it in the clone URL or command arguments. The running server also receives `GITHUB_TOKEN` so commands can use it for GitHub operations.
+
+**Important credential boundary:** `MCP_AUTH_TOKEN` authenticates remote MCP requests. `GITHUB_TOKEN` authorizes GitHub operations. They are not interchangeable. Since `run_command` executes arbitrary shell commands, code run by the agent can potentially read the server process environment, including `GITHUB_TOKEN`. Use a narrowly scoped, short-lived token and do not run untrusted repositories or commands in a runtime holding valuable credentials.
+
+### Connect and verify
+
+- The notebook prints a temporary URL ending in `/mcp`. Configure a compatible MCP client to use that HTTPS URL and send `Authorization: Bearer <MCP_AUTH_TOKEN>`.
+- The notebook runs a local authenticated HTTP smoke check. It does not prove that a particular ChatGPT account or mobile client can connect.
+- Do not paste either secret into a URL, notebook source, repository, or chat message. Do not share the tunnel URL casually: authentication remains required, but the URL is still a public entry point.
+- If Colab stops or disconnects, the server and tunnel stop. Rerun the cells; the tunnel URL may change, and local runtime files may be lost.
+
+### Colab limitations
+
+Colab is an ephemeral testing runtime, not a persistent server host. Runtime availability, idle timeouts, and resource limits vary. A Cloudflare Quick Tunnel URL is temporary, not a stable production hostname. The notebook downloads the current Linux `cloudflared` package from Cloudflare's official GitHub release, so that dependency is not pinned to a specific release. For a long-running deployment, use Docker Compose on a machine or VM you control.
