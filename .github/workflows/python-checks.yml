@@ -25,5 +25,22 @@ jobs:
         run: uv run pytest
       - name: Build Docker image
         run: docker build --tag remote-coding-agent:ci .
+      - name: Smoke-test the running container end to end
+        env:
+          MCP_AUTH_TOKEN: ci-only-token-with-at-least-thirty-two-characters
+        run: |
+          set -euo pipefail
+          docker run --detach --rm \
+            --name remote-coding-agent-ci \
+            --publish 127.0.0.1:18000:8000 \
+            --env MCP_AUTH_TOKEN="$MCP_AUTH_TOKEN" \
+            remote-coding-agent:ci
+          cleanup() {
+            docker logs remote-coding-agent-ci || true
+            docker rm --force remote-coding-agent-ci >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          REMOTE_CODING_AGENT_URL=http://127.0.0.1:18000/mcp \
+            uv run python scripts/smoke_test_container.py
       - name: Validate Colab notebook JSON
         run: python -m json.tool notebooks/remote_coding_agent_colab.ipynb > /dev/null
