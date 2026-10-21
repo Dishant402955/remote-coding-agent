@@ -30,23 +30,24 @@ def _resolve_working_directory(workspace: Path, requested: str | None) -> Path:
 def _limit_output(stdout: str, stderr: str, limit: int) -> tuple[str, str, bool]:
     if limit < 1:
         raise ValueError("max_output_chars must be greater than zero")
-    total = len(stdout) + len(stderr)
-    if total <= limit:
+    if len(stdout) + len(stderr) <= limit:
         return stdout, stderr, False
 
-    marker = "\n...[output truncated]"
-    usable = max(0, limit - len(marker))
-    kept_stdout = stdout[:usable]
-    remaining = usable - len(kept_stdout)
-    kept_stderr = stderr[:remaining]
-    if len(kept_stdout) + len(kept_stderr) < usable:
-        kept_stderr += stderr[len(kept_stderr) : max(len(kept_stderr), remaining)]
-    if len(kept_stdout) + len(kept_stderr) < usable and not stdout:
-        kept_stderr = stderr[:usable]
-    if kept_stdout:
-        kept_stdout += marker
-    else:
+    marker = "...[truncated]"
+    if limit <= len(marker):
+        combined = stdout + stderr
+        return combined[:limit], "", True
+
+    usable = limit - len(marker)
+    if len(stdout) >= usable:
+        return stdout[:usable] + marker, "", True
+
+    kept_stdout = stdout
+    kept_stderr = stderr[: usable - len(kept_stdout)]
+    if len(kept_stderr) < len(stderr):
         kept_stderr += marker
+    else:
+        kept_stdout += marker
     return kept_stdout, kept_stderr, True
 
 

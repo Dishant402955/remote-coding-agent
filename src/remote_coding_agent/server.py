@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -44,7 +43,11 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
             working_directory: Optional directory relative to the workspace root.
             timeout_seconds: Optional timeout, capped by the server configuration.
         """
-        timeout = timeout_seconds or settings.default_timeout_seconds
+        timeout = (
+            settings.default_timeout_seconds
+            if timeout_seconds is None
+            else timeout_seconds
+        )
         try:
             return await execute_command(
                 command=command,
@@ -64,6 +67,7 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
                 "output_truncated": False,
                 "duration_seconds": 0.0,
             }
+
 
     app = BearerTokenMiddleware(mcp.streamable_http_app(), settings.auth_token)
     return mcp, app
