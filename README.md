@@ -300,3 +300,28 @@ Actual variable names and defaults will be finalized during implementation. Exam
 ## 12. Definition of success
 
 From ChatGPT on a phone or browser, the user can instruct the agent to work on a repository in the configured remote workspace. The agent can inspect files, make changes, run checks, show a bounded summary and diff, and perform Git operations when explicitly configured. The same core Python server can run in Docker on a normal machine/VM and directly in Colab, with authentication and deployment differences documented clearly.
+
+
+## 13. Phase 0 compatibility findings (checked 2026-10-21)
+
+This section records verified platform constraints before implementation. The backend can still be built and tested independently, but the planned *native ChatGPT connection* is gated by the user's plan and client surface.
+
+### Verified constraints
+
+1. **Native custom MCP app eligibility:** OpenAI's current documentation describes full custom MCP support, including write/modify actions, for ChatGPT Business, Enterprise, and Edu. Pro is documented as having custom MCP connections with read/fetch permissions only. ChatGPT Go is not listed as supporting custom MCP apps, so this project must not assume that a Go account can connect this server as a native custom MCP app. See [Connecting custom MCP servers in ChatGPT](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt) and [Creating custom MCP apps in ChatGPT](https://help.openai.com/en/articles/12584461-creating-custom-mcp-apps-in-chatgpt).
+
+2. **Mobile limitation:** OpenAI currently documents custom MCP apps as web-only, not available in the ChatGPT mobile apps. This means the exact goal of invoking the server from the native ChatGPT phone app is not currently supported by the documented native custom-MCP path. The backend itself should remain client-independent so another compatible MCP client can be used for testing or development. Source: [Creating custom MCP apps in ChatGPT](https://help.openai.com/en/articles/12584461-creating-custom-mcp-apps-in-chatgpt).
+
+3. **GPT Actions are not an assumed workaround:** OpenAI's current GPT documentation says personal ChatGPT accounts, including Go, cannot create or publish new GPTs. Existing GPTs may remain usable, subject to eligibility and permissions. We should not plan on creating a new custom GPT Action unless the account interface and current rules confirm it is available. Source: [Creating and editing GPTs](https://help.openai.com/en/articles/8554397-gpts).
+
+4. **Authentication needs an integration-level test:** The custom-MCP setup flow asks the user to configure authentication, but the public guidance reviewed here does not establish that every account/client offers an arbitrary static bearer-token field in the exact form this service wants. Do not assume that sending `Authorization: Bearer ...` is supported until the eligible integration's configuration and a real connection test confirm it. GPT Actions have documented API-key options (Basic, Bearer, or custom header), but the availability of that route is separately gated by GPT creation permissions. Source: [Configuring actions in GPTs](https://help.openai.com/en/articles/9442513).
+
+### Phase 0 decision
+
+- Continue building the Python server as a standalone, authenticated MCP service. Keep it independent of a specific ChatGPT plan or interface.
+- Verify Python MCP SDK/HTTP transport compatibility and local end-to-end behavior before adding Docker and Colab packaging.
+- Treat a native ChatGPT app connection as an external compatibility gate, not as something already guaranteed by this codebase.
+- Until account eligibility and mobile support change or are otherwise confirmed, test the backend with a compatible MCP client and document that this does **not** prove native ChatGPT mobile integration.
+- Do not remove authentication or expose command execution publicly to work around client limitations.
+
+These findings describe the published product documentation at the date above; ChatGPT plans and app support can change, so re-check the official guidance when setting up the final integration.
