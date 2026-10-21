@@ -19,7 +19,9 @@ def _resolve_working_directory(workspace: Path, requested: str | None) -> Path:
     try:
         candidate.relative_to(root)
     except ValueError as exc:
-        raise CommandExecutionError("working_directory must stay inside the configured workspace") from exc
+        raise CommandExecutionError(
+            "working_directory must stay inside the configured workspace"
+        ) from exc
     if not candidate.exists():
         raise CommandExecutionError("working_directory does not exist")
     if not candidate.is_dir():

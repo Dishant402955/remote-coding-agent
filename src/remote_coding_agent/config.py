@@ -36,7 +36,7 @@ class Settings:
     max_output_chars: int = 20_000
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         """Load settings from environment variables, failing closed without a token."""
         token = os.getenv("MCP_AUTH_TOKEN", "").strip()
         if not token or token == "replace-with-a-long-random-secret":
@@ -48,7 +48,11 @@ class Settings:
         if not host:
             raise ConfigurationError("REMOTE_CODING_AGENT_HOST must not be empty")
 
-        port = _positive_int("REMOTE_CODING_AGENT_PORT", os.getenv("REMOTE_CODING_AGENT_PORT"), 8000)
+        port = _positive_int(
+            "REMOTE_CODING_AGENT_PORT",
+            os.getenv("REMOTE_CODING_AGENT_PORT"),
+            8000,
+        )
         if port > 65535:
             raise ConfigurationError("REMOTE_CODING_AGENT_PORT must be at most 65535")
 

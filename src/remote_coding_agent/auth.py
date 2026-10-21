@@ -7,7 +7,14 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-ASGIApp = Callable[[dict[str, Any], Callable[..., Awaitable[Any]], Callable[..., Awaitable[Any]]], Awaitable[None]]
+ASGIApp = Callable[
+    [
+        dict[str, Any],
+        Callable[..., Awaitable[Any]],
+        Callable[..., Awaitable[Any]],
+    ],
+    Awaitable[None],
+]
 
 
 def token_matches(authorization: str | None, expected_token: str) -> bool:
@@ -33,7 +40,12 @@ class BearerTokenMiddleware:
         self.app = app
         self.expected_token = expected_token
 
-    async def __call__(self, scope: dict[str, Any], receive: Callable[..., Awaitable[Any]], send: Callable[..., Awaitable[Any]]) -> None:
+    async def __call__(
+        self,
+        scope: dict[str, Any],
+        receive: Callable[..., Awaitable[Any]],
+        send: Callable[..., Awaitable[Any]],
+    ) -> None:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
