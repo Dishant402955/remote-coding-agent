@@ -1,6 +1,8 @@
 """Tests for bounded shell execution and workspace restrictions."""
 
 import asyncio
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -54,7 +56,41 @@ def test_times_out_long_running_command(tmp_path: Path) -> None:
     assert result["exit_code"] != 0
 
 
+def test_timeout_kills_descendant_that_keeps_pipes_open(tmp_path: Path) -> None:
+    if os.name != "posix":
+        pytest.skip("process-group cleanup is POSIX-specific")
+    started = time.monotonic()
+    result = run("(sleep 10) & wait", tmp_path, timeout_seconds=1)
+    elapsed = time.monotonic() - started
+    assert result["timed_out"] is True
+    assert elapsed < 4
+
+
+def test_caps_large_stdout_and_stderr_without_unbounded_capture(tmp_path: Path) -> None:
+    result = run(
+        "yes x | head -c 2000000; yes y | head -c 2000000 >&2",
+        tmp_path,
+        timeout_seconds=3,
+        max_output_chars=128,
+    )
+    assert result["output_truncated"] is True
+    assert len(result["stdout"]) + len(result["stderr"]) <= 128
+
+
 def test_truncates_oversized_output(tmp_path: Path) -> None:
     result = run("printf 'abcdefghijklmnop'", tmp_path, max_output_chars=10)
     assert result["output_truncated"] is True
-    assert len(result["stdout"]) <= 10
+    assert len(result["stdout"]) + len(result["stderr"]) <= 10
+
+
+def test_rejects_invalid_output_limit(tmp_path: Path) -> None:
+    with pytest.raises(CommandExecutionError, match="max_output_chars"):
+        run("printf ok", tmp_path, max_output_chars=0)
+
+
+def test_symlink_working_directory_cannot_escape_workspace(tmp_path: Path) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (tmp_path / "escape").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(CommandExecutionError, match="inside"):
+        run("pwd", tmp_path, working_directory="escape")

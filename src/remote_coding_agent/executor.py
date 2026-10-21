@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
 import time
 from pathlib import Path
 from typing import Any
@@ -53,6 +55,48 @@ def _limit_output(stdout: str, stderr: str, limit: int) -> tuple[str, str, bool]
     return kept_stdout, kept_stderr, True
 
 
+async def _drain_bounded(
+    reader: asyncio.StreamReader, byte_limit: int
+) -> tuple[bytes, bool]:
+    """Drain a pipe fully while retaining no more than byte_limit bytes."""
+    chunks: list[bytes] = []
+    retained = 0
+    truncated = False
+    while chunk := await reader.read(64 * 1024):
+        available = max(0, byte_limit - retained)
+        if available:
+            kept = chunk[:available]
+            chunks.append(kept)
+            retained += len(kept)
+        if len(chunk) > available:
+            truncated = True
+    return b"".join(chunks), truncated
+
+
+def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+    """Kill the shell and its process group, not just the shell wrapper."""
+    if process.returncode is not None:
+        # A shell can exit while descendants keep its output pipes open.
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        return
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+            return
+        except ProcessLookupError:
+            return
+        except OSError:
+            pass
+    try:
+        process.kill()
+    except ProcessLookupError:
+        pass
+
+
 async def execute_command(
     *,
     command: str,
@@ -62,7 +106,7 @@ async def execute_command(
     max_output_chars: int,
     working_directory: str | None = None,
 ) -> dict[str, Any]:
-    """Run a shell command and return bounded output plus execution metadata."""
+    """Run a shell command with a bounded timeout and bounded output memory."""
     if not command or not command.strip():
         raise CommandExecutionError("command must not be empty")
     if timeout_seconds < 1:
@@ -71,6 +115,8 @@ async def execute_command(
         raise CommandExecutionError(
             f"timeout_seconds cannot exceed the configured maximum of {max_timeout_seconds}"
         )
+    if max_output_chars < 1:
+        raise CommandExecutionError("max_output_chars must be greater than zero")
 
     cwd = _resolve_working_directory(workspace, working_directory)
     started = time.monotonic()
@@ -79,23 +125,43 @@ async def execute_command(
         cwd=str(cwd),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        start_new_session=(os.name == "posix"),
     )
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    # Each pipe has a strict byte budget. Readers continue draining after the
+    # budget is reached, preventing a full pipe from deadlocking the child.
+    stdout_task = asyncio.create_task(_drain_bounded(process.stdout, max_output_chars))
+    stderr_task = asyncio.create_task(_drain_bounded(process.stderr, max_output_chars))
+    completion = asyncio.gather(process.wait(), stdout_task, stderr_task)
     timed_out = False
     try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            process.communicate(), timeout=timeout_seconds
-        )
-    except TimeoutError:
-        timed_out = True
-        process.kill()
-        stdout_bytes, stderr_bytes = await process.communicate()
+        try:
+            _, stdout_result, stderr_result = await asyncio.wait_for(
+                asyncio.shield(completion), timeout=timeout_seconds
+            )
+        except TimeoutError:
+            timed_out = True
+            _kill_process_tree(process)
+            _, stdout_result, stderr_result = await completion
+    except asyncio.CancelledError:
+        _kill_process_tree(process)
+        try:
+            await asyncio.shield(completion)
+        finally:
+            raise
 
-    duration = round(time.monotonic() - started, 3)
-    stdout, stderr, output_truncated = _limit_output(
-        stdout_bytes.decode("utf-8", errors="replace"),
-        stderr_bytes.decode("utf-8", errors="replace"),
-        max_output_chars,
-    )
+    stdout_bytes, stdout_limited = stdout_result
+    stderr_bytes, stderr_limited = stderr_result
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
+    stderr = stderr_bytes.decode("utf-8", errors="replace")
+    if stdout_limited:
+        stdout += "...[truncated]"
+    if stderr_limited:
+        stderr += "...[truncated]"
+    stdout, stderr, output_limited = _limit_output(stdout, stderr, max_output_chars)
+
     return {
         "command": command,
         "working_directory": str(cwd),
@@ -103,6 +169,6 @@ async def execute_command(
         "stderr": stderr,
         "exit_code": process.returncode,
         "timed_out": timed_out,
-        "output_truncated": output_truncated,
-        "duration_seconds": duration,
+        "output_truncated": stdout_limited or stderr_limited or output_limited,
+        "duration_seconds": round(time.monotonic() - started, 3),
     }
