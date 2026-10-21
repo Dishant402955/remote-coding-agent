@@ -25,3 +25,5 @@ jobs:
         run: uv run pytest
       - name: Build Docker image
         run: docker build --tag remote-coding-agent:ci .
+      - name: Validate Colab notebook JSON
+        run: python -m json.tool notebooks/remote_coding_agent_colab.ipynb > /dev/null
