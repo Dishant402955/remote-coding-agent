@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 import re
 import signal
 import time
-from pathlib import Path
 from typing import Any
 
 
 _SECRET_ENV_NAME = re.compile(
-    r"(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_KEY|PRIVATE_KEY|ACCESS_KEY|AUTHORIZATION)",
+    r"(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_KEY|PRIVATE_KEY|ACCESS_KEY|AUTHORIZATION|AUTH|COOKIE|BEARER)",
     re.IGNORECASE,
 )
 
@@ -24,6 +24,7 @@ def _command_environment() -> dict[str, str]:
         "SSH_ASKPASS",
         "GIT_CONFIG_COUNT",
         "GIT_CONFIG_PARAMETERS",
+        "SSH_AUTH_SOCK",
     }
     return {
         name: value

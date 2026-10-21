@@ -95,3 +95,16 @@ def test_symlink_working_directory_cannot_escape_workspace(tmp_path: Path) -> No
     (tmp_path / "escape").symlink_to(outside, target_is_directory=True)
     with pytest.raises(CommandExecutionError, match="inside"):
         run("pwd", tmp_path, working_directory="escape")
+
+
+def test_child_process_does_not_receive_secret_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MCP_AUTH_TOKEN", "server-secret-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "github-secret-token")
+    monkeypatch.setenv("PUBLIC_TEST_VALUE", "visible")
+    result = run(
+        'printf "%s|%s|%s" "$MCP_AUTH_TOKEN" "$GITHUB_TOKEN" "$PUBLIC_TEST_VALUE"',
+        tmp_path,
+    )
+    assert result["stdout"] == "||visible"
