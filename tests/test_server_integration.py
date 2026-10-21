@@ -51,7 +51,7 @@ def _initialize(client: TestClient):
 def test_mcp_http_rejects_missing_and_invalid_tokens(tmp_path) -> None:
     _, app = create_server(Settings(auth_token=AUTH_TOKEN, workspace=tmp_path))
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         payload = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -98,6 +98,7 @@ def test_mcp_http_initializes_and_runs_command_with_valid_token(tmp_path) -> Non
 
         initialize_result = _mcp_payload(initialized)
         assert initialize_result["result"]["serverInfo"]["name"] == "Remote Coding Agent"
+        negotiated_version = initialize_result["result"]["protocolVersion"]
 
         tool_response = client.post(
             "/mcp",
@@ -106,7 +107,7 @@ def test_mcp_http_initializes_and_runs_command_with_valid_token(tmp_path) -> Non
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
                 "MCP-Session-Id": session_id,
-                "MCP-Protocol-Version": PROTOCOL_VERSION,
+                "MCP-Protocol-Version": negotiated_version,
             },
             json={
                 "jsonrpc": "2.0",
