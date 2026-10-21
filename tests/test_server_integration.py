@@ -90,7 +90,7 @@ def test_mcp_http_initializes_and_runs_command_with_valid_token(tmp_path) -> Non
         )
     )
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         initialized = _initialize(client)
         assert initialized.status_code == 200, initialized.text
         session_id = initialized.headers.get("mcp-session-id")
