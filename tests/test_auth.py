@@ -155,3 +155,27 @@ def test_middleware_rejects_oversized_chunked_body() -> None:
     asyncio.run(middleware(scope, receive, send))
     assert not called
     assert sent[0]["status"] == 413
+
+
+
+def test_middleware_can_skip_auth_while_still_dispatching_request() -> None:
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    async def receive():
+        return {"type": "http.request", "body": b"{}", "more_body": False}
+
+    async def send(message):
+        pass
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp",
+        "headers": [],
+    }
+    asyncio.run(BearerTokenMiddleware(app, None)(scope, receive, send))
+    assert called
