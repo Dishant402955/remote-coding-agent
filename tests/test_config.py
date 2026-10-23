@@ -37,6 +37,7 @@ def test_valid_environment_uses_safe_defaults(monkeypatch: pytest.MonkeyPatch) -
         "REMOTE_CODING_AGENT_MAX_COMMAND_CHARS",
         "REMOTE_CODING_AGENT_MAX_CONCURRENT_COMMANDS",
         "REMOTE_CODING_AGENT_MAX_REQUEST_BYTES",
+        "REMOTE_CODING_AGENT_TEST_MODE",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -50,6 +51,7 @@ def test_valid_environment_uses_safe_defaults(monkeypatch: pytest.MonkeyPatch) -
     assert settings.max_command_chars == 16_384
     assert settings.max_concurrent_commands == 4
     assert settings.max_request_bytes == 1_048_576
+    assert settings.test_mode is False
 
 
 @pytest.mark.parametrize("port", ["0", "-1", "65536", "not-a-port"])
@@ -102,3 +104,24 @@ def test_no_auth_mode_does_not_require_a_token(monkeypatch: pytest.MonkeyPatch) 
 
     assert settings.auth_mode == "none"
     assert settings.auth_token == ""
+
+
+
+def test_test_mode_environment_flag_is_parsed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMOTE_CODING_AGENT_AUTH_MODE", "none")
+    monkeypatch.delenv("MCP_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("REMOTE_CODING_AGENT_TEST_MODE", "true")
+
+    settings = Settings.from_env()
+
+    assert settings.test_mode is True
+
+
+def test_invalid_test_mode_environment_flag_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_AUTH_TOKEN", TEST_TOKEN)
+    monkeypatch.setenv("REMOTE_CODING_AGENT_TEST_MODE", "sometimes")
+
+    with pytest.raises(ConfigurationError, match="TEST_MODE"):
+        Settings.from_env()
