@@ -38,6 +38,7 @@ class Settings:
     max_command_chars: int = 16_384
     max_concurrent_commands: int = 4
     max_request_bytes: int = 1_048_576
+    test_mode: bool = False
 
     def __post_init__(self) -> None:
         mode = self.auth_mode.strip().lower() if isinstance(self.auth_mode, str) else ""
@@ -51,6 +52,8 @@ class Settings:
                 "MCP_AUTH_TOKEN must contain at least 32 characters of secret material "
                 "when REMOTE_CODING_AGENT_AUTH_MODE=bearer"
             )
+        if not isinstance(self.test_mode, bool):
+            raise ConfigurationError("REMOTE_CODING_AGENT_TEST_MODE must be a boolean")
         if not isinstance(self.host, str) or not self.host.strip():
             raise ConfigurationError("REMOTE_CODING_AGENT_HOST must not be empty")
         if not isinstance(self.port, int) or isinstance(self.port, bool):
@@ -96,6 +99,13 @@ class Settings:
         token = os.getenv("MCP_AUTH_TOKEN", "").strip()
         if auth_mode == "bearer" and not token:
             raise ConfigurationError("MCP_AUTH_TOKEN must be set when auth mode is bearer")
+
+        raw_test_mode = os.getenv("REMOTE_CODING_AGENT_TEST_MODE", "false").strip().lower()
+        if raw_test_mode not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+            raise ConfigurationError(
+                "REMOTE_CODING_AGENT_TEST_MODE must be true or false"
+            )
+        test_mode = raw_test_mode in {"1", "true", "yes", "on"}
 
         host = os.getenv("REMOTE_CODING_AGENT_HOST", "127.0.0.1").strip()
         port = _positive_int(
@@ -149,4 +159,5 @@ class Settings:
             max_command_chars=max_command,
             max_concurrent_commands=max_concurrent,
             max_request_bytes=max_request_bytes,
+            test_mode=test_mode,
         )
