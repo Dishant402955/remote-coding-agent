@@ -153,3 +153,90 @@ def test_mcp_http_initializes_and_runs_command_with_valid_token(tmp_path) -> Non
     assert structured["stdout"] == "integration-ok"
     assert structured["exit_code"] == 0
     assert structured["timed_out"] is False
+
+
+
+def test_unauthenticated_test_mode_allows_only_smoke_commands(tmp_path) -> None:
+    _, app = create_server(
+        Settings(
+            auth_mode="none",
+            test_mode=True,
+            workspace=tmp_path,
+            default_timeout_seconds=5,
+            max_timeout_seconds=10,
+        )
+    )
+
+    with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+        initialized = client.post(
+            "/mcp",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name": "test-mode-check", "version": "1.0.0"},
+                },
+            },
+        )
+        assert initialized.status_code == 200, initialized.text
+        session_id = initialized.headers.get("mcp-session-id")
+        assert session_id
+        initialized_payload = _mcp_payload(initialized)
+        negotiated_version = initialized_payload["result"]["protocolVersion"]
+
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "MCP-Session-Id": session_id,
+            "MCP-Protocol-Version": negotiated_version,
+        }
+        safe_call = client.post(
+            "/mcp",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "run_command",
+                    "arguments": {"command": "printf 'mcp-test-ok'"},
+                },
+            },
+        )
+        assert safe_call.status_code == 200, safe_call.text
+        safe_payload = _mcp_payload(safe_call)["result"]
+        safe_result = safe_payload.get("structuredContent")
+        if safe_result is None:
+            safe_result = json.loads(safe_payload["content"][0]["text"])
+        assert safe_result["stdout"] == "mcp-test-ok"
+        assert safe_result["exit_code"] == 0
+
+        blocked_file = tmp_path / "must-not-be-created"
+        blocked_call = client.post(
+            "/mcp",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "run_command",
+                    "arguments": {"command": f"touch {blocked_file}"},
+                },
+            },
+        )
+        assert blocked_call.status_code == 200, blocked_call.text
+        blocked_payload = _mcp_payload(blocked_call)["result"]
+        blocked_result = blocked_payload.get("structuredContent")
+        if blocked_result is None:
+            blocked_result = json.loads(blocked_payload["content"][0]["text"])
+        assert blocked_result["exit_code"] == 126
+        assert "test mode only permits" in blocked_result["stderr"]
+        assert not blocked_file.exists()
