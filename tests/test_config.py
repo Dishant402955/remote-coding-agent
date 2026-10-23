@@ -91,3 +91,14 @@ def test_direct_settings_rejects_non_integer_limits() -> None:
 def test_direct_settings_rejects_non_string_host() -> None:
     with pytest.raises(ConfigurationError, match="HOST must not be empty"):
         Settings(auth_token=TEST_TOKEN, host=123)
+
+
+
+def test_no_auth_mode_does_not_require_a_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MCP_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("REMOTE_CODING_AGENT_AUTH_MODE", "none")
+
+    settings = Settings.from_env()
+
+    assert settings.auth_mode == "none"
+    assert settings.auth_token == ""
