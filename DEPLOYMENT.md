@@ -4,7 +4,9 @@ This guide covers the existing Remote Coding Agent implementation. It does not c
 
 ## 1. Read this before deploying
 
-The service executes arbitrary shell commands for an authenticated client. A command can read, write, delete, compile, install, or run anything permitted by the operating-system identity and container. Authentication only decides who can submit commands; it does not make commands safe.
+The service executes arbitrary shell commands for a client. A command can read, write, delete, compile, install, or run anything permitted by the operating-system identity and container. Authentication only decides who can submit commands; it does not make commands safe.
+
+`REMOTE_CODING_AGENT_AUTH_MODE` supports `bearer` (the default) and `none`. The `none` mode removes the authentication check but retains request-size limits. **Use `none` only on a private, trusted network where the endpoint cannot be reached by untrusted users. Never use it with a public Cloudflare Quick Tunnel or other public endpoint:** anyone who can reach the endpoint could run shell commands in the runtime.
 
 **Recommended starting point:** run the Docker Compose deployment on a dedicated machine, keep the service bound to loopback, and connect only through a trusted private network or a carefully configured HTTPS reverse proxy.
 
@@ -183,7 +185,7 @@ Press `Ctrl+C` in the terminal running the server. Inspect the process list if y
 
 ## 6. Option C: Google Colab
 
-Colab is an optional, temporary path for testing. It is not a reliable persistent server and should not be treated as a secure host for high-value credentials.
+Colab is an optional, temporary path for testing. It is not a reliable persistent server and should not be treated as a secure host for high-value credentials. The one-click notebook uses bearer authentication because its Cloudflare Quick Tunnel is publicly reachable.
 
 1. Open [the Colab notebook](notebooks/remote_coding_agent_colab.ipynb).
 2. Add `MCP_AUTH_TOKEN` to Colab Secrets. Generate a separate high-entropy value; do not reuse a GitHub credential.
@@ -200,7 +202,8 @@ The notebook verifies a local tool call and an authenticated public-tunnel initi
 
 | Variable | Default | Accepted range / meaning |
 | --- | --- | --- |
-| `MCP_AUTH_TOKEN` | Required | At least 32 characters; keep it secret |
+| `REMOTE_CODING_AGENT_AUTH_MODE` | `bearer` | `bearer` or `none`; `none` is only for private trusted networks |
+| `MCP_AUTH_TOKEN` | Required when mode is `bearer` | At least 32 characters; keep it secret |
 | `REMOTE_CODING_AGENT_HOST` | `127.0.0.1` | Bind address; loopback is the safest default |
 | `REMOTE_CODING_AGENT_PORT` | `8000` | Integer from 1 to 65535 |
 | `REMOTE_CODING_AGENT_WORKSPACE` | `./workspace` | Root for relative working-directory requests |
