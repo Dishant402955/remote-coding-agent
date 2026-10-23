@@ -1,4 +1,4 @@
-"""Run the authenticated Remote Coding Agent MCP server."""
+"""Run the Remote Coding Agent MCP server."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def _disable_linux_process_inspection() -> None:
 
 
 def create_server(settings: Settings) -> tuple[FastMCP, Any]:
-    """Build the MCP server and wrap its HTTP app with mandatory bearer auth."""
+    """Build the MCP server with configured auth and bounded HTTP requests."""
     settings.workspace.expanduser().resolve().mkdir(parents=True, exist_ok=True)
     mcp = FastMCP(
         "Remote Coding Agent",
@@ -120,8 +120,9 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
         finally:
             execution_slots.release()
 
+    expected_token = settings.auth_token if settings.auth_mode == "bearer" else None
     app = BearerTokenMiddleware(
-        mcp.streamable_http_app(), settings.auth_token, settings.max_request_bytes
+        mcp.streamable_http_app(), expected_token, settings.max_request_bytes
     )
     return mcp, app
 
