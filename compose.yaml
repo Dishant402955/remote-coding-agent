@@ -4,7 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?Set MCP_AUTH_TOKEN before starting}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      REMOTE_CODING_AGENT_AUTH_MODE: ${REMOTE_CODING_AGENT_AUTH_MODE:-bearer}
       REMOTE_CODING_AGENT_HOST: 0.0.0.0
       REMOTE_CODING_AGENT_PORT: "8000"
       REMOTE_CODING_AGENT_WORKSPACE: /workspace
