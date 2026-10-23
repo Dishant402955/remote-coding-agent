@@ -1,4 +1,4 @@
-"""Bearer-token authentication and request-size limits for the MCP HTTP endpoint."""
+"""Optional bearer-token authentication and request-size limits for MCP HTTP."""
 
 from __future__ import annotations
 
@@ -35,11 +35,9 @@ class BearerTokenMiddleware:
     def __init__(
         self,
         app: ASGIApp,
-        expected_token: str,
+        expected_token: str | None,
         max_request_bytes: int = 1_048_576,
     ) -> None:
-        if not expected_token:
-            raise ValueError("expected_token must not be empty")
         if max_request_bytes < 1:
             raise ValueError("max_request_bytes must be greater than zero")
         self.app = app
@@ -74,7 +72,7 @@ class BearerTokenMiddleware:
             for key, value in headers
             if key.lower() == b"authorization"
         ]
-        if (
+        if self.expected_token is not None and (
             len(authorization_headers) != 1
             or not token_matches(authorization_headers[0], self.expected_token)
         ):
