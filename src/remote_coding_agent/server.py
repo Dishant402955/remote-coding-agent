@@ -18,6 +18,14 @@ from remote_coding_agent.executor import CommandExecutionError, execute_command
 
 logger = logging.getLogger("remote_coding_agent")
 
+# Exact commands permitted by the temporary no-auth MCP smoke-test mode.
+_TEST_MODE_COMMANDS = frozenset({
+    "pwd",
+    "ls -la",
+    "python --version",
+    "printf 'mcp-test-ok'",
+})
+
 
 def _disable_linux_process_inspection() -> None:
     """Prevent same-UID processes from reading this server's memory/environment on Linux."""
@@ -71,6 +79,19 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
                     f"{settings.max_command_chars} characters"
                 ),
                 "exit_code": 2,
+                "timed_out": False,
+                "output_truncated": False,
+                "duration_seconds": 0.0,
+            }
+
+        if settings.test_mode and command.strip() not in _TEST_MODE_COMMANDS:
+            return {
+                "stdout": "",
+                "stderr": (
+                    "test mode only permits these exact commands: "
+                    + ", ".join(sorted(_TEST_MODE_COMMANDS))
+                ),
+                "exit_code": 126,
                 "timed_out": False,
                 "output_truncated": False,
                 "duration_seconds": 0.0,
