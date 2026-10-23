@@ -27,7 +27,8 @@ def _positive_int(name: str, raw_value: str | None, default: int) -> int:
 class Settings:
     """Validated runtime settings. Secrets are never loaded from a committed file."""
 
-    auth_token: str
+    auth_token: str = ""
+    auth_mode: str = "bearer"
     host: str = "127.0.0.1"
     port: int = 8000
     workspace: Path = Path("./workspace")
@@ -39,10 +40,16 @@ class Settings:
     max_request_bytes: int = 1_048_576
 
     def __post_init__(self) -> None:
+        mode = self.auth_mode.strip().lower() if isinstance(self.auth_mode, str) else ""
+        if mode not in {"bearer", "none"}:
+            raise ConfigurationError("REMOTE_CODING_AGENT_AUTH_MODE must be bearer or none")
         token = self.auth_token.strip() if isinstance(self.auth_token, str) else ""
-        if len(token) < 32 or token == "replace-with-a-long-random-secret":
+        if mode == "bearer" and (
+            len(token) < 32 or token == "replace-with-a-long-random-secret"
+        ):
             raise ConfigurationError(
-                "MCP_AUTH_TOKEN must contain at least 32 characters of secret material"
+                "MCP_AUTH_TOKEN must contain at least 32 characters of secret material "
+                "when REMOTE_CODING_AGENT_AUTH_MODE=bearer"
             )
         if not isinstance(self.host, str) or not self.host.strip():
             raise ConfigurationError("REMOTE_CODING_AGENT_HOST must not be empty")
@@ -77,14 +84,18 @@ class Settings:
         if not 1 <= self.max_request_bytes <= 10_485_760:
             raise ConfigurationError("max_request_bytes must be between 1 and 10485760")
         object.__setattr__(self, "auth_token", token)
+        object.__setattr__(self, "auth_mode", mode)
         object.__setattr__(self, "workspace", Path(self.workspace).expanduser())
 
     @classmethod
     def from_env(cls) -> Settings:
         """Load settings from environment variables, failing closed without a token."""
+        auth_mode = os.getenv("REMOTE_CODING_AGENT_AUTH_MODE", "bearer").strip().lower()
+        if auth_mode not in {"bearer", "none"}:
+            raise ConfigurationError("REMOTE_CODING_AGENT_AUTH_MODE must be bearer or none")
         token = os.getenv("MCP_AUTH_TOKEN", "").strip()
-        if not token:
-            raise ConfigurationError("MCP_AUTH_TOKEN must be set before the server can start")
+        if auth_mode == "bearer" and not token:
+            raise ConfigurationError("MCP_AUTH_TOKEN must be set when auth mode is bearer")
 
         host = os.getenv("REMOTE_CODING_AGENT_HOST", "127.0.0.1").strip()
         port = _positive_int(
@@ -128,6 +139,7 @@ class Settings:
 
         return cls(
             auth_token=token,
+            auth_mode=auth_mode,
             host=host,
             port=port,
             workspace=workspace,
