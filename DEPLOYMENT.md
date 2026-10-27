@@ -195,7 +195,7 @@ This is the correct path for unrestricted run_command access without putting an 
 2. Associate the tunnel with the target ChatGPT workspace and Platform organization.
 3. Create a restricted runtime API key with **Tunnels Read + Use**. Do not use an admin key as the long-running runtime credential.
 4. Open [notebooks/remote_coding_agent_colab.ipynb](notebooks/remote_coding_agent_colab.ipynb) in Colab and run the deployment cell.
-5. Enter the tunnel_id when prompted. Enter the runtime API key at the hidden prompt; it is not written into the notebook source.
+5. Enter the full `tunnel_id` when prompted. The notebook accepts the legacy `tunnel_<32 lowercase letters or digits>` format and the namespaced `tunnel_<4-character namespace>_<32 lowercase letters or digits>` format documented by the official client. Enter the runtime API key at the hidden prompt; it is not written into the notebook source.
 6. Wait for `tunnel-client doctor --explain`, the local MCP smoke test, `/readyz`, and a successful control-plane poll check to pass.
 
 ### Check account eligibility before opening ChatGPT
