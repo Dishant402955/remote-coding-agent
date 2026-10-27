@@ -7,7 +7,7 @@ The project deliberately keeps the tool surface small. That also means commands 
 ## Features
 
 - Python MCP server using Streamable HTTP.
-- Bearer-token authentication on every HTTP request.
+- Optional bearer-token authentication; the default Docker deployment requires a token.
 - Configurable workspace, timeout, command length, output size, and concurrent execution limits.
 - Bounded stdout/stderr capture and process-group termination on timeout on POSIX systems.
 - Common credential-bearing environment variables are filtered from child command environments.
@@ -39,7 +39,7 @@ Keep it on loopback unless you have deliberately configured a trusted private ne
 
 ## Configuration
 
-All settings are read from environment variables. The MCP token is required; use a high-entropy value of at least 32 characters.
+All settings are read from environment variables. Bearer mode requires an MCP token with at least 32 characters of high-entropy secret material. For the Colab Secure MCP Tunnel flow, the MCP server runs without its own token on loopback and tunnel-client authenticates to OpenAI.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
