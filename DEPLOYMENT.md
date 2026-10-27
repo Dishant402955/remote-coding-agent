@@ -183,20 +183,30 @@ Leave the process running. The endpoint is `http://127.0.0.1:8000/mcp`. Use the 
 
 Press `Ctrl+C` in the terminal running the server. Inspect the process list if you started it through another process manager.
 
-## 6. Option C: Google Colab
+## 6. Option C: Google Colab with OpenAI Secure MCP Tunnel
 
-Colab is an optional, temporary path for testing. It is not a reliable persistent server and should not be treated as a secure host for high-value credentials. The one-click notebook uses bearer authentication because its Cloudflare Quick Tunnel is publicly reachable.
+The notebook starts the server with REMOTE_CODING_AGENT_AUTH_MODE=none and REMOTE_CODING_AGENT_TEST_MODE=false, but binds the server to 127.0.0.1 only. It then connects using OpenAI's official tunnel-client. The MCP server itself does not require a bearer token; tunnel-client authenticates to OpenAI using a runtime API key.
 
-1. Open [the Colab notebook](notebooks/remote_coding_agent_colab.ipynb).
-2. Add `MCP_AUTH_TOKEN` to Colab Secrets. Generate a separate high-entropy value; do not reuse a GitHub credential.
-3. Add `GITHUB_TOKEN` only if you need to clone a private repository. Use the minimum repository permissions and an expiry. The notebook uses it for the clone/pull step and does not intentionally forward it to the server process.
-4. Run the notebook cells from top to bottom. The notebook installs dependencies, obtains the code, verifies the downloaded `cloudflared` package digest against release metadata, starts the server and temporary tunnel, and tests authentication, MCP initialization, a harmless `run_command`, and an authenticated initialization through the public tunnel.
-5. Copy the printed HTTPS URL ending in `/mcp` into a compatible MCP client and configure the bearer header. Never put the token in the URL.
-6. Run the notebook cleanup cell before ending the session.
+This is the correct path for unrestricted run_command access without putting an unauthenticated shell on a public URL. Do not replace this with a public Cloudflare Quick Tunnel when auth is disabled. A public no-auth endpoint would allow anyone who reaches it to execute shell commands in the runtime.
 
-The tunnel URL is public and temporary, and the Colab runtime may reset at any time. Environment filtering is not a full sandbox: commands can access files and OS resources allowed to the Colab runtime identity. Do not use this path with sensitive source code, production credentials, or valuable GitHub tokens.
+### Before running the notebook
 
-The notebook verifies a local tool call and an authenticated public-tunnel initialization, but does not verify compatibility with ChatGPT. Perform a real connection test with the exact client you intend to use.
+1. Open [OpenAI Platform Tunnels](https://platform.openai.com/settings/organization/tunnels) and create or select a tunnel.
+2. Create a runtime API key with **Tunnels Read + Use** for that tunnel. Do not use an admin key as the long-running runtime credential.
+3. Open [notebooks/remote_coding_agent_colab.ipynb](notebooks/remote_coding_agent_colab.ipynb) in Colab and run the deployment cell.
+4. Enter the tunnel_id when prompted. Enter the runtime API key at the hidden prompt; it is not written into the notebook source.
+5. Wait for the local MCP smoke test and tunnel-client /healthz and /readyz checks to pass.
+
+### Connect ChatGPT
+
+1. In ChatGPT on the web, open **Plugins → + → Add custom MCP server**.
+2. Under **Connection**, choose **Tunnel**, then select the tunnel or paste the printed tunnel_id.
+3. Configure MCP authentication as **None** if the form asks. The server itself has no bearer-token auth.
+4. Review the warning and create the plugin. Keep the Colab runtime and tunnel-client running while using it.
+
+Secure MCP Tunnel intentionally does not provide a public server URL. The notebook prints the local-only MCP URL (http://127.0.0.1:8000/mcp) for diagnostics and the tunnel_id for ChatGPT's Tunnel connection. Do not paste the local URL into the public HTTPS endpoint field.
+
+The notebook checks required tools and Python packages, installs the repository in editable mode, verifies the downloaded tunnel-client release SHA-256, checks the server's MCP initialize/tool-discovery/tool-call path, and waits for tunnel readiness. These checks verify the local server and tunnel client; the final ChatGPT tool call must still be tested in the target ChatGPT account.
 
 ## 7. Configuration reference
 
