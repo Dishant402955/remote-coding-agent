@@ -192,10 +192,17 @@ This is the correct path for unrestricted run_command access without putting an 
 ### Before running the notebook
 
 1. Open [OpenAI Platform Tunnels](https://platform.openai.com/settings/organization/tunnels) and create or select a tunnel.
-2. Create a runtime API key with **Tunnels Read + Use** for that tunnel. Do not use an admin key as the long-running runtime credential.
-3. Open [notebooks/remote_coding_agent_colab.ipynb](notebooks/remote_coding_agent_colab.ipynb) in Colab and run the deployment cell.
-4. Enter the tunnel_id when prompted. Enter the runtime API key at the hidden prompt; it is not written into the notebook source.
-5. Wait for the local MCP smoke test and tunnel-client /healthz and /readyz checks to pass.
+2. Associate the tunnel with the target ChatGPT workspace and Platform organization.
+3. Create a restricted runtime API key with **Tunnels Read + Use**. Do not use an admin key as the long-running runtime credential.
+4. Open [notebooks/remote_coding_agent_colab.ipynb](notebooks/remote_coding_agent_colab.ipynb) in Colab and run the deployment cell.
+5. Enter the tunnel_id when prompted. Enter the runtime API key at the hidden prompt; it is not written into the notebook source.
+6. Wait for `tunnel-client doctor --explain`, the local MCP smoke test, `/readyz`, and a successful control-plane poll check to pass.
+
+### Check account eligibility before opening ChatGPT
+
+OpenAI's current Help Center lists custom MCP connections and full MCP support for **Business** and **Enterprise/Edu** on the web. **Pro** is limited to read/fetch custom MCP connections. **Go is not listed as eligible** for custom MCP creation, so if your Go account does not show Add custom MCP server, that is a plan-availability blocker, not a Colab failure. See [OpenAI's current availability and permission requirements](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt).
+
+This creates a private ChatGPT custom MCP connection, not a public plugin listing. OpenAI's Secure MCP Tunnel documentation says private tunnel connections are not used for public plugin submission or distribution.
 
 ### Connect ChatGPT
 
@@ -206,7 +213,7 @@ This is the correct path for unrestricted run_command access without putting an 
 
 Secure MCP Tunnel intentionally does not provide a public server URL. The notebook prints the local-only MCP URL (http://127.0.0.1:8000/mcp) for diagnostics and the tunnel_id for ChatGPT's Tunnel connection. Do not paste the local URL into the public HTTPS endpoint field.
 
-The notebook checks required tools and Python packages, installs the repository in editable mode, verifies the downloaded tunnel-client release SHA-256, checks the server's MCP initialize/tool-discovery/tool-call path, and waits for tunnel readiness. These checks verify the local server and tunnel client; the final ChatGPT tool call must still be tested in the target ChatGPT account.
+The notebook checks required tools and Python packages, installs the repository in editable mode, verifies the downloaded tunnel-client release SHA-256, runs `tunnel-client doctor --explain`, checks the server's MCP initialize/tool-discovery/tool-call path, waits for `/readyz`, and verifies that the control-plane component has observed a successful poll before reporting success. These checks verify the local server and tunnel runtime; the final ChatGPT tool call must still be tested in an eligible target ChatGPT account.
 
 
 ### OpenAI documentation used by this deployment
