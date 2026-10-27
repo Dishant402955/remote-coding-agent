@@ -208,6 +208,18 @@ Secure MCP Tunnel intentionally does not provide a public server URL. The notebo
 
 The notebook checks required tools and Python packages, installs the repository in editable mode, verifies the downloaded tunnel-client release SHA-256, checks the server's MCP initialize/tool-discovery/tool-call path, and waits for tunnel readiness. These checks verify the local server and tunnel client; the final ChatGPT tool call must still be tested in the target ChatGPT account.
 
+
+### OpenAI documentation used by this deployment
+
+This setup is checked against the current official documentation:
+
+- [Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels): tunnel ID, runtime API key, permissions, workspace association, network requirements, and ChatGPT setup.
+- [Official tunnel-client README](https://github.com/openai/tunnel-client/blob/master/README.md): supported binary and CLI quickstart.
+- [Tunnel-client configuration reference](https://github.com/openai/tunnel-client/blob/master/docs/configuration.md): environment variables, MCP server URL, and health listener configuration.
+- [Tunnel-client troubleshooting](https://github.com/openai/tunnel-client/blob/master/docs/troubleshooting.md): doctor preflight, readiness checks, and connection failures.
+- [ChatGPT custom MCP server requirements](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt): Tunnel connection selection, authentication settings, and plan/workspace access.
+
+
 ## 7. Configuration reference
 
 | Variable | Default | Accepted range / meaning |
