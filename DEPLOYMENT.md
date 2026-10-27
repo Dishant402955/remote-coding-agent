@@ -33,7 +33,7 @@ For direct Python deployment:
 For Colab deployment:
 - A Google account with access to Colab.
 - The notebook at [`notebooks/remote_coding_agent_colab.ipynb`](notebooks/remote_coding_agent_colab.ipynb).
-- Awareness that Colab is ephemeral and the Quick Tunnel creates a public HTTPS address.
+- Awareness that Colab is ephemeral. The notebook uses OpenAI Secure MCP Tunnel, which connects by tunnel_id rather than a public server URL.
 
 ## 3. Generate the MCP access token
 
@@ -258,9 +258,9 @@ Timeouts and output truncation are deliberate safety limits. Reduce the amount o
 
 In Docker, the root filesystem is read-only. Write project files inside the mounted workspace or temporary files under `/tmp`. Do not disable the security controls just to make a command succeed without understanding why it needs broader access.
 
-### Colab tunnel does not start
+### Colab Secure MCP Tunnel does not become ready
 
-Inspect `/content/cloudflared.log` and `/content/remote-coding-agent-server.log`. Check network availability, release metadata, and the tunnel URL detection. The notebook intentionally fails if the release metadata does not provide a SHA-256 digest to verify the downloaded package.
+Inspect `/content/remote-coding-agent-server.log` and `/content/remote-coding-agent-tunnel-client.log`. Confirm the tunnel_id is valid, the runtime API key has Tunnels Read + Use, the tunnel is associated with the target ChatGPT workspace, and the runtime can reach OpenAI over outbound HTTPS. The notebook verifies the official tunnel-client release SHA-256 and stops both processes if readiness is not reached.
 
 ## 9. Run verification checks
 
