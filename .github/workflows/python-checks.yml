@@ -16,31 +16,26 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - name: Set up Python
-        run: uv python install 3.11
-      - name: Install package and development dependencies
-        run: uv sync --extra dev
+        run: uv python install 3.12.16
+      - name: Install locked project and development dependencies
+        run: uv sync --locked --python 3.12.16 --extra dev
       - name: Lint
         run: uv run ruff check .
       - name: Run tests
         run: uv run pytest
-      - name: Build Docker image
-        run: docker build --tag remote-coding-agent:ci .
-      - name: Smoke-test the running container end to end
-        env:
-          MCP_AUTH_TOKEN: ci-only-token-with-at-least-thirty-two-characters
-        run: |
-          set -euo pipefail
-          docker run --detach --rm \
-            --name remote-coding-agent-ci \
-            --publish 127.0.0.1:8000:8000 \
-            --env MCP_AUTH_TOKEN="$MCP_AUTH_TOKEN" \
-            remote-coding-agent:ci
-          cleanup() {
-            docker logs remote-coding-agent-ci || true
-            docker rm --force remote-coding-agent-ci >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-          REMOTE_CODING_AGENT_URL=http://127.0.0.1:8000/mcp \
-            uv run python scripts/smoke_test_container.py
-      - name: Validate Colab notebook JSON
+      - name: Validate notebook JSON
         run: python -m json.tool notebooks/remote_coding_agent_colab.ipynb > /dev/null
+      - name: Compile notebook Python cells
+        run: |
+          python - <<'PY'
+          import ast
+          import json
+          from pathlib import Path
+
+          notebook = json.loads(Path("notebooks/remote_coding_agent_colab.ipynb").read_text())
+          for index, cell in enumerate(notebook.get("cells", [])):
+              if cell.get("cell_type") == "code":
+                  compile("".join(cell.get("source", [])), f"notebook-cell-{index}", "exec", flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
+          PY
+      - name: Validate Ubuntu scripts
+        run: bash -n scripts/setup-ubuntu.sh scripts/up.sh

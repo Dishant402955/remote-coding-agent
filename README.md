@@ -1,90 +1,101 @@
 # Remote Coding Agent
 
-Remote Coding Agent is a self-hosted MCP server that exposes one general-purpose `run_command` tool. A compatible MCP client can use it to run development commands in a workspace hosted on your machine, VM, or a supported notebook runtime.
+Remote Coding Agent is a small MCP server that exposes one `run_command` tool. It runs on a machine you control and connects to ChatGPT through **OpenAI Secure MCP Tunnel**.
 
-The project deliberately keeps the tool surface small. That also means commands can modify files and do anything permitted to the server's operating-system identity. **Treat this service as remote code execution, not as a safe read-only assistant.**
+There are exactly two supported deployment paths:
 
-## Features
+1. **Google Colab:** run [`notebooks/remote_coding_agent_colab.ipynb`](notebooks/remote_coding_agent_colab.ipynb).
+2. **Native Ubuntu:** run [`scripts/setup-ubuntu.sh`](scripts/setup-ubuntu.sh) once, then [`scripts/up.sh`](scripts/up.sh) whenever you want to connect the machine.
 
-- Python MCP server using Streamable HTTP.
-- Optional bearer-token authentication; the default Docker deployment requires a token.
-- Configurable workspace, timeout, command length, output size, and concurrent execution limits.
-- Bounded stdout/stderr capture and process-group termination on timeout on POSIX systems.
-- Common credential-bearing environment variables are filtered from child command environments.
-- Non-root Docker image and a hardened Docker Compose configuration.
-- Optional Google Colab notebook for ephemeral remote testing.
+The repository contains the application source, tests, notebook, Ubuntu scripts, and documentation. It does not provide a Docker or Compose deployment.
 
-## Quick start (Docker)
+## Native Ubuntu quick start
 
-Requirements: Docker Engine with the Compose plugin.
+Supported platform: Ubuntu 22.04 or newer on x86-64/amd64.
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-export MCP_AUTH_TOKEN='paste-the-generated-secret-here'
-mkdir -p workspace
-docker compose up --build -d
-docker compose ps
-docker compose logs --tail=100
+sudo apt update
+sudo apt install -y git curl ca-certificates
+git clone https://github.com/Dishant402955/remote-coding-agent.git
+cd remote-coding-agent
+./scripts/setup-ubuntu.sh
+./scripts/up.sh
 ```
 
-The Compose configuration binds to `127.0.0.1` by default. The MCP endpoint is:
+`setup-ubuntu.sh` installs `uv`, Python 3.12.16, the locked project dependencies, and the official OpenAI `tunnel-client` v0.0.19 release after verifying its pinned SHA-256. It also creates a locked, non-login system account named `remote-coding-agent-tunnel`, installs the tunnel client under a root-owned directory, and creates a private `workspace/` directory. This one-time setup requires `sudo`.
+
+`up.sh` prompts for the existing OpenAI tunnel ID and runtime API key every time. The key is hidden while typing and is not saved to disk. It starts the MCP server on `127.0.0.1:8000` as your normal Ubuntu user, performs a real MCP initialization/tool/command smoke test, and runs `tunnel-client` under the dedicated system account. The key is transferred to that account over stdin, not exposed in the normal user's process arguments or environment. The script runs tunnel diagnostics and waits for `/healthz`, `/readyz`, and a successful OpenAI control-plane poll. Keep that terminal open. Press `Ctrl+C` to stop both processes; stopping the isolated tunnel account may ask for your sudo password again.
+
+After a reboot or whenever you want to reconnect, only run:
+
+```bash
+cd ~/projects/remote-coding-agent   # replace this if your clone is elsewhere
+./scripts/up.sh
+```
+
+You do not need to reinstall Python or the tunnel client each time. You do need to authorize sudo and enter the tunnel ID and runtime API key at each start. Keep using your existing ChatGPT connector and tunnel; do not create a new one just for a reboot.
+
+**Migrating from the earlier single-user Ubuntu launcher:** stop its server and tunnel-client processes, revoke the runtime API key used by that version, and create a replacement key. The earlier launcher ran `tunnel-client` under the same Linux account as `run_command`, which allowed a same-UID command to inspect its key through `/proc`. The new setup uses a dedicated system account for the tunnel process.
+
+## Google Colab
+
+Open [`notebooks/remote_coding_agent_colab.ipynb`](notebooks/remote_coding_agent_colab.ipynb) in Google Colab and run its deployment cell. It installs the project into the temporary Colab runtime, validates the official tunnel-client download, checks the local MCP tool, and starts the Secure MCP Tunnel. Re-enter the tunnel ID and runtime API key after a runtime reset. Run the notebook's cleanup cell when finished.
+
+Colab is ephemeral. Files in its runtime are not a persistent copy of your Ubuntu machine. Colab runs the MCP server and tunnel client in the same runtime identity, so this path does not provide the separate-UID credential protection used by the native Ubuntu launcher. Treat a Colab session as disposable: do not expose valuable credentials or sensitive files to it, and revoke its runtime key when finished if you have any concern it was exposed.
+
+## How it works
 
 ```text
-http://127.0.0.1:8000/mcp
+ChatGPT
+   │ OpenAI Secure MCP Tunnel
+   ▼
+OpenAI tunnel control plane
+   ▲ outbound authenticated connection
+   │
+tunnel-client (dedicated system account)
+   │ http://127.0.0.1:8000/mcp
+   ▼
+Remote Coding Agent MCP server
+   │
+   ▼
+Shell command running as your Ubuntu user
 ```
 
-Keep it on loopback unless you have deliberately configured a trusted private network or HTTPS reverse proxy. Do not expose a command-execution endpoint directly to the public internet.
+The MCP server binds to loopback and uses `REMOTE_CODING_AGENT_AUTH_MODE=none`. The local endpoint is not exposed directly to the LAN or public internet. The MCP server and `run_command` execute as your normal Ubuntu user; `tunnel-client` runs as the separate locked `remote-coding-agent-tunnel` system account. The runtime API key is sent to that account over stdin and exists in the tunnel process environment only. The launcher invalidates the normal user's cached sudo ticket before reporting the tunnel ready. Root can still inspect both processes, and the normal user's account can regain privileged access by authenticating with sudo.
 
-**Full instructions:** [Deployment Guide](DEPLOYMENT.md)
+## Security: read this before connecting
 
-## Configuration
+**This tool executes shell commands as the operating-system user running the server. It is remote code execution, not a read-only file browser.** A command may read, create, modify, or delete any file that this Linux user can access, including files outside `workspace/`.
 
-All settings are read from environment variables. Bearer mode requires an MCP token with at least 32 characters of high-entropy secret material. For the Colab Secure MCP Tunnel flow, the MCP server runs without its own token on loopback and tunnel-client authenticates to OpenAI.
+`workspace/` is the default working directory and the allowed base for the tool's `working_directory` argument. It is **not a filesystem sandbox**: shell commands can still use absolute paths or access other locations allowed by your user account. Do not assume your home directory or personal files are protected. Keep the endpoint on loopback, protect your ChatGPT account and tunnel credentials, and disconnect the tunnel when you are done.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `MCP_AUTH_TOKEN` | Required | Bearer token for the MCP HTTP endpoint |
-| `REMOTE_CODING_AGENT_HOST` | `127.0.0.1` | Server bind address |
-| `REMOTE_CODING_AGENT_PORT` | `8000` | Server port |
-| `REMOTE_CODING_AGENT_WORKSPACE` | `./workspace` | Workspace root and default working directory |
-| `REMOTE_CODING_AGENT_DEFAULT_TIMEOUT_SECONDS` | `30` | Default per-command timeout |
-| `REMOTE_CODING_AGENT_MAX_TIMEOUT_SECONDS` | `300` | Maximum per-command timeout, capped at 3600 |
-| `REMOTE_CODING_AGENT_MAX_OUTPUT_CHARS` | `20000` | Maximum combined returned output, capped at 1000000 |
-| `REMOTE_CODING_AGENT_MAX_COMMAND_CHARS` | `16384` | Maximum command string length, capped at 65536 |
-| `REMOTE_CODING_AGENT_MAX_CONCURRENT_COMMANDS` | `4` | Concurrent commands, configurable from 1 to 16 |
-| `REMOTE_CODING_AGENT_MAX_REQUEST_BYTES` | `1048576` | Request body limit, configurable from 1 to 10485760 bytes |
+The server strips common secret-bearing environment variables from child command environments, and the Ubuntu launcher gives the MCP server a minimal environment. The separate tunnel system account prevents ordinary same-user command processes from reading the tunnel client's environment through `/proc`. The launcher also clears the user's cached sudo authorization while the tunnel is active. This is defense in depth, not a full sandbox: root can inspect both processes, and commands still have all filesystem and network access permitted to your normal user. Use a separate Linux account or VM for stronger isolation and keep sensitive credentials out of that account. Do not enter your sudo password in response to an unexpected prompt while the remote tool is active.
 
-## Development and checks
+Never commit runtime API keys, private work files, or contents of `workspace/`. The Ubuntu launcher does not save the runtime key. If a key is exposed, revoke and replace it.
 
-Requirements: Python 3.11 or newer and [uv](https://docs.astral.sh/uv/).
+## Development and verification
+
+Requirements: Python 3.11+ and [uv](https://docs.astral.sh/uv/). The Ubuntu setup script installs Python 3.12.16 and `uv` for you.
 
 ```bash
-uv sync --extra dev
+uv sync --locked --extra dev
 uv run ruff check .
 uv run pytest
-docker build -t remote-coding-agent:local .
+python -m json.tool notebooks/remote_coding_agent_colab.ipynb >/dev/null
+bash -n scripts/setup-ubuntu.sh scripts/up.sh
 ```
 
-The CI workflow runs lint, tests, a Docker image build, and notebook JSON validation. Notebook JSON validation alone does not execute a live Colab session. Check the Actions run for the commit you intend to use.
-
-## Security model and limitations
-
-- **Authentication is not a sandbox.** The bearer token protects HTTP access; it does not limit what an authenticated command can do.
-- **Workspace paths restrict the selected working directory, not all filesystem access.** A shell command may read or modify any path allowed to the process identity.
-- **Environment filtering is defense in depth.** Common token/secret/password/key variables and Git askpass configuration are removed from child environments, but this cannot protect credentials stored in readable files, accessible sockets, or other OS resources.
-- **Use a dedicated runtime.** Do not run this service as a privileged user on a personal machine with broad access to private files. The Docker deployment is safer than running it directly on a host, but Docker is not a perfect security boundary.
-- **Credentials must be least-privilege.** Never mount the Docker socket or the host home directory. Avoid placing Git credentials in the workspace. Rotate any credential that may have been exposed to commands.
-- **Remote traffic must be encrypted.** The default Compose binding is loopback. For remote use, prefer a VPN/private network or a correctly configured HTTPS reverse proxy, and retain bearer authentication.
-- **Colab is temporary and public-facing when tunneled.** Do not use valuable secrets or sensitive workspaces there. Runtime resets erase local state and quick-tunnel URLs change.
-- **Client compatibility is separate from server functionality.** Passing local MCP tests does not prove that a specific ChatGPT plan, mobile app, or third-party client supports the endpoint and authentication configuration.
+GitHub Actions runs the same Python checks, validates notebook JSON, and checks shell script syntax. The workflow deliberately does not build or test a container image because containers are not a supported deployment path.
 
 ## Repository layout
 
 ```text
-src/remote_coding_agent/  Server, configuration, authentication, command executor
-tests/                    Unit and MCP HTTP integration tests
-notebooks/                Optional Colab deployment notebook
-Dockerfile                Non-root container image
-compose.yaml              Local deployment defaults and resource controls
-DEPLOYMENT.md             Step-by-step deployment and troubleshooting
+src/remote_coding_agent/              MCP server, configuration, auth, command executor
+tests/                                Unit and HTTP/MCP integration tests
+notebooks/remote_coding_agent_colab.ipynb
+scripts/setup-ubuntu.sh                One-time native Ubuntu setup
+scripts/up.sh                          Start MCP server + Secure MCP Tunnel
+README.md                              Overview, quick starts, security model
+DEPLOYMENT.md                          Detailed deployment and recovery guide
+pyproject.toml / uv.lock               Project metadata and pinned dependencies
 ```

@@ -9,6 +9,8 @@ htmlcov/
 venv/
 .env
 .env.*
-!.env.example
 .ipynb_checkpoints/
 .DS_Store
+workspace/
+build/
+dist/
