@@ -12,6 +12,7 @@ from typing import Any
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
+
 from remote_coding_agent.auth import BearerTokenMiddleware
 from remote_coding_agent.config import Settings
 from remote_coding_agent.executor import CommandExecutionError, execute_command
