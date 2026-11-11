@@ -24,9 +24,9 @@ cd remote-coding-agent
 
 `setup-ubuntu.sh` installs `uv`, Python 3.12.16, the locked project dependencies, and the official OpenAI `tunnel-client` v0.0.19 release after verifying its pinned SHA-256. It also creates a locked, non-login system account named `remote-coding-agent-tunnel`, installs the tunnel client under a root-owned directory, and creates a private `workspace/` directory. This one-time setup requires `sudo`.
 
-`up.sh` prompts for the existing OpenAI tunnel ID and runtime API key every time. The key is hidden while typing and is not saved to disk. It starts the MCP server on `127.0.0.1:8000` as your normal Ubuntu user, performs a real MCP initialization/tool/command smoke test, and runs `tunnel-client` under the dedicated system account. The key is transferred to that account over stdin, not exposed in the normal user's process arguments or environment. The script runs tunnel diagnostics and waits for `/healthz`, `/readyz`, and a successful OpenAI control-plane poll. Keep that terminal open. Press `Ctrl+C` to stop both processes; stopping the isolated tunnel account may ask for your sudo password again.
+`up.sh` prompts for the existing OpenAI tunnel ID and runtime API key every time. The key is hidden while typing and is not saved to disk. It starts the MCP server on `127.0.0.1:8000` as your normal Ubuntu user, performs an MCP initialization/tool/command smoke test, and runs `tunnel-client` under the dedicated system account. The key is transferred to that account over stdin, not exposed in the normal user's process arguments or environment. The MCP server and tunnel each run under a restart supervisor with bounded exponential backoff. The server supervisor restarts a crashed or repeatedly unhealthy MCP process; the tunnel supervisor checks readiness and control-plane polling and restarts a degraded client. Tunnel connections use a 24-hour maximum TTL and are re-established automatically. Logs rotate under `/tmp/`. Use `tmux new -s remote-agent ./scripts/up.sh` to keep the launcher alive after disconnecting your terminal. Press `Ctrl+C` inside tmux to stop both processes; stopping the isolated tunnel account may ask for your sudo password again.
 
-After a reboot or whenever you want to reconnect, only run:
+After a reboot or whenever you want to reconnect, start a tmux session and run:
 
 ```bash
 cd ~/projects/remote-coding-agent   # replace this if your clone is elsewhere
@@ -82,7 +82,8 @@ uv sync --locked --extra dev
 uv run ruff check .
 uv run pytest
 python -m json.tool notebooks/remote_coding_agent_colab.ipynb >/dev/null
-bash -n scripts/setup-ubuntu.sh scripts/up.sh
+bash -n scripts/setup-ubuntu.sh scripts/up.sh scripts/server-supervisor.sh scripts/tunnel-client-supervisor.sh
+uv run python scripts/soak-test.py --help
 ```
 
 GitHub Actions runs the same Python checks, validates notebook JSON, and checks shell script syntax. The workflow deliberately does not build or test a container image because containers are not a supported deployment path.
@@ -94,7 +95,10 @@ src/remote_coding_agent/              MCP server, configuration, auth, command e
 tests/                                Unit and HTTP/MCP integration tests
 notebooks/remote_coding_agent_colab.ipynb
 scripts/setup-ubuntu.sh                One-time native Ubuntu setup
-scripts/up.sh                          Start MCP server + Secure MCP Tunnel
+scripts/up.sh                          Start supervised MCP server + Secure MCP Tunnel
+scripts/server-supervisor.sh           Restart and health-watch the MCP server
+scripts/tunnel-client-supervisor.sh    Restart and health-watch Secure MCP Tunnel
+scripts/soak-test.py                    Long-duration MCP reliability test
 README.md                              Overview, quick starts, security model
 DEPLOYMENT.md                          Detailed deployment and recovery guide
 pyproject.toml / uv.lock               Project metadata and pinned dependencies

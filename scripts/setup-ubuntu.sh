@@ -61,7 +61,7 @@ sudo -v
 
 log "Checking Ubuntu prerequisites"
 MISSING_PACKAGES=()
-for item in git curl unzip sha256sum python3 setsid pgrep pkill; do
+for item in git curl unzip sha256sum python3 setsid pgrep pkill tmux; do
   if ! command -v "$item" >/dev/null 2>&1; then
     case "$item" in
       sha256sum) MISSING_PACKAGES+=(coreutils) ;;
@@ -193,6 +193,7 @@ sudo install -o root -g root -m 644 "$STAGING_DIR/NOTICE" "$SYSTEM_STAGING_DIR/N
 sudo install -o root -g root -m 644 "$STAGING_DIR/tunnel-client-v0.0.19-linux-amd64-licenses.txt" "$SYSTEM_STAGING_DIR/tunnel-client-v0.0.19-linux-amd64-licenses.txt"
 sudo install -o root -g root -m 644 "$STAGING_DIR/tunnel-client-v0.0.19-linux-amd64.spdx.json" "$SYSTEM_STAGING_DIR/tunnel-client-v0.0.19-linux-amd64.spdx.json"
 sudo -u "$TUNNEL_USER" -- "$SYSTEM_STAGING_DIR/tunnel-client" --version >/dev/null
+sudo install -o root -g root -m 755 "$ROOT/scripts/tunnel-client-supervisor.sh" "$SYSTEM_BASE/tunnel-client-supervisor.sh"
 if [[ -d "$TUNNEL_INSTALL_DIR" ]]; then
   sudo mv -- "$TUNNEL_INSTALL_DIR" "$SYSTEM_BACKUP_DIR"
 fi

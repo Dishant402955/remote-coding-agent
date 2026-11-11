@@ -1,10 +1,12 @@
 """End-to-end tests for the authenticated Streamable HTTP MCP endpoint."""
 
+import asyncio
 import json
 from typing import Any
 
 from starlette.testclient import TestClient
 
+import remote_coding_agent.server as server_module
 from remote_coding_agent.config import Settings
 from remote_coding_agent.server import create_server
 
@@ -240,3 +242,106 @@ def test_unauthenticated_test_mode_allows_only_smoke_commands(tmp_path) -> None:
         assert blocked_result["exit_code"] == 126
         assert "test mode only permits" in blocked_result["stderr"]
         assert not blocked_file.exists()
+
+
+
+def test_long_lived_session_capacity_is_applied_to_fastmcp(tmp_path) -> None:
+    mcp, _ = create_server(
+        Settings(
+            auth_token=AUTH_TOKEN,
+            workspace=tmp_path,
+            session_idle_timeout_seconds=43200,
+            max_sessions=48,
+        )
+    )
+    assert mcp.settings.session_idle_timeout == 43200.0
+    assert mcp.settings.max_sessions == 48
+    assert mcp.settings.max_request_body_size == 1_048_576
+
+
+def test_command_queue_is_bounded_and_serves_waiting_work(
+    tmp_path, monkeypatch
+) -> None:
+    async def fake_execute_command(**kwargs):
+        await asyncio.sleep(0.15)
+        return {
+            "stdout": kwargs["command"],
+            "stderr": "",
+            "exit_code": 0,
+            "timed_out": False,
+            "output_truncated": False,
+            "duration_seconds": 0.15,
+        }
+
+    monkeypatch.setattr(server_module, "execute_command", fake_execute_command)
+    mcp, _ = create_server(
+        Settings(
+            auth_token=AUTH_TOKEN,
+            workspace=tmp_path,
+            max_concurrent_commands=1,
+            max_queued_commands=1,
+            command_queue_timeout_seconds=2,
+        )
+    )
+
+    async def invoke(command: str):
+        return await mcp._tool_manager.call_tool(
+            "run_command", {"command": command}, convert_result=False
+        )
+
+    async def scenario():
+        first = asyncio.create_task(invoke("first"))
+        await asyncio.sleep(0.02)
+        second = asyncio.create_task(invoke("second"))
+        await asyncio.sleep(0.02)
+        rejected = await invoke("third")
+        completed = await asyncio.gather(first, second)
+        return completed, rejected
+
+    completed, rejected = asyncio.run(scenario())
+    assert all(item["exit_code"] == 0 for item in completed)
+    assert [item["stdout"] for item in completed] == ["first", "second"]
+    assert rejected["exit_code"] == 75
+    assert "queue is full" in rejected["stderr"]
+
+
+def test_command_queue_wait_timeout_returns_busy_result(
+    tmp_path, monkeypatch
+) -> None:
+    async def slow_execute_command(**kwargs):
+        await asyncio.sleep(1.2)
+        return {
+            "stdout": "done",
+            "stderr": "",
+            "exit_code": 0,
+            "timed_out": False,
+            "output_truncated": False,
+            "duration_seconds": 1.2,
+        }
+
+    monkeypatch.setattr(server_module, "execute_command", slow_execute_command)
+    mcp, _ = create_server(
+        Settings(
+            auth_token=AUTH_TOKEN,
+            workspace=tmp_path,
+            max_concurrent_commands=1,
+            max_queued_commands=1,
+            command_queue_timeout_seconds=1,
+        )
+    )
+
+    async def invoke():
+        return await mcp._tool_manager.call_tool(
+            "run_command", {"command": "queued"}, convert_result=False
+        )
+
+    async def scenario():
+        first = asyncio.create_task(invoke())
+        await asyncio.sleep(0.05)
+        second = await invoke()
+        await first
+        return second
+
+    result = asyncio.run(scenario())
+    assert result["exit_code"] == 75
+    assert "waited too long" in result["stderr"]

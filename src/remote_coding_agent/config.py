@@ -1,7 +1,5 @@
 """Environment-based configuration and validation."""
-
 from __future__ import annotations
-
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,14 +24,17 @@ def _positive_int(name: str, raw_value: str | None, default: int) -> int:
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Validated runtime settings. Secrets are never loaded from a committed file."""
-
     auth_token: str = ""
     auth_mode: str = "bearer"
     host: str = "127.0.0.1"
     port: int = 8000
     workspace: Path = Path("./workspace")
-    default_timeout_seconds: int = 30
-    max_timeout_seconds: int = 300
+    default_timeout_seconds: int = 120
+    max_timeout_seconds: int = 3600
+    command_queue_timeout_seconds: int = 30
+    session_idle_timeout_seconds: int = 86400
+    max_sessions: int = 256
+    max_queued_commands: int = 64
     max_output_chars: int = 20_000
     max_command_chars: int = 16_384
     max_concurrent_commands: int = 4
@@ -60,16 +61,18 @@ class Settings:
             raise ConfigurationError("REMOTE_CODING_AGENT_PORT must be an integer")
         if not 1 <= self.port <= 65535:
             raise ConfigurationError("REMOTE_CODING_AGENT_PORT must be between 1 and 65535")
-        for name, value in (
-            ("default_timeout_seconds", self.default_timeout_seconds),
-            ("max_timeout_seconds", self.max_timeout_seconds),
-            ("max_output_chars", self.max_output_chars),
-            ("max_command_chars", self.max_command_chars),
-            ("max_concurrent_commands", self.max_concurrent_commands),
-            ("max_request_bytes", self.max_request_bytes),
-        ):
+
+        fields = (
+            "default_timeout_seconds", "max_timeout_seconds",
+            "command_queue_timeout_seconds", "session_idle_timeout_seconds",
+            "max_sessions", "max_queued_commands", "max_output_chars",
+            "max_command_chars", "max_concurrent_commands", "max_request_bytes",
+        )
+        for name in fields:
+            value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool):
                 raise ConfigurationError(f"{name} must be an integer")
+
         if self.default_timeout_seconds < 1 or self.max_timeout_seconds < 1:
             raise ConfigurationError("command timeouts must be greater than zero")
         if self.max_timeout_seconds > 3600:
@@ -78,6 +81,14 @@ class Settings:
             raise ConfigurationError(
                 "REMOTE_CODING_AGENT_DEFAULT_TIMEOUT_SECONDS cannot exceed the maximum"
             )
+        if not 1 <= self.command_queue_timeout_seconds <= 300:
+            raise ConfigurationError("command_queue_timeout_seconds must be between 1 and 300")
+        if not 60 <= self.session_idle_timeout_seconds <= 604800:
+            raise ConfigurationError("session_idle_timeout_seconds must be between 60 and 604800")
+        if not 1 <= self.max_sessions <= 10_000:
+            raise ConfigurationError("max_sessions must be between 1 and 10000")
+        if not 1 <= self.max_queued_commands <= 1024:
+            raise ConfigurationError("max_queued_commands must be between 1 and 1024")
         if not 1 <= self.max_output_chars <= 1_000_000:
             raise ConfigurationError("max_output_chars must be between 1 and 1000000")
         if not 1 <= self.max_command_chars <= 65_536:
@@ -99,65 +110,33 @@ class Settings:
         token = os.getenv("MCP_AUTH_TOKEN", "").strip()
         if auth_mode == "bearer" and not token:
             raise ConfigurationError("MCP_AUTH_TOKEN must be set when auth mode is bearer")
-
         raw_test_mode = os.getenv("REMOTE_CODING_AGENT_TEST_MODE", "false").strip().lower()
         if raw_test_mode not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
-            raise ConfigurationError(
-                "REMOTE_CODING_AGENT_TEST_MODE must be true or false"
-            )
+            raise ConfigurationError("REMOTE_CODING_AGENT_TEST_MODE must be true or false")
         test_mode = raw_test_mode in {"1", "true", "yes", "on"}
 
-        host = os.getenv("REMOTE_CODING_AGENT_HOST", "127.0.0.1").strip()
-        port = _positive_int(
-            "REMOTE_CODING_AGENT_PORT",
-            os.getenv("REMOTE_CODING_AGENT_PORT"),
-            8000,
-        )
-        default_timeout = _positive_int(
-            "REMOTE_CODING_AGENT_DEFAULT_TIMEOUT_SECONDS",
-            os.getenv("REMOTE_CODING_AGENT_DEFAULT_TIMEOUT_SECONDS"),
-            30,
-        )
-        max_timeout = _positive_int(
-            "REMOTE_CODING_AGENT_MAX_TIMEOUT_SECONDS",
-            os.getenv("REMOTE_CODING_AGENT_MAX_TIMEOUT_SECONDS"),
-            300,
-        )
-        max_output = _positive_int(
-            "REMOTE_CODING_AGENT_MAX_OUTPUT_CHARS",
-            os.getenv("REMOTE_CODING_AGENT_MAX_OUTPUT_CHARS"),
-            20_000,
-        )
-        max_command = _positive_int(
-            "REMOTE_CODING_AGENT_MAX_COMMAND_CHARS",
-            os.getenv("REMOTE_CODING_AGENT_MAX_COMMAND_CHARS"),
-            16_384,
-        )
-        max_concurrent = _positive_int(
-            "REMOTE_CODING_AGENT_MAX_CONCURRENT_COMMANDS",
-            os.getenv("REMOTE_CODING_AGENT_MAX_CONCURRENT_COMMANDS"),
-            4,
-        )
-        max_request_bytes = _positive_int(
-            "REMOTE_CODING_AGENT_MAX_REQUEST_BYTES",
-            os.getenv("REMOTE_CODING_AGENT_MAX_REQUEST_BYTES"),
-            1_048_576,
-        )
-        workspace = Path(
-            os.getenv("REMOTE_CODING_AGENT_WORKSPACE", "./workspace")
-        ).expanduser()
+        def setting(name: str, default: int) -> int:
+            return _positive_int(name, os.getenv(name), default)
 
         return cls(
             auth_token=token,
             auth_mode=auth_mode,
-            host=host,
-            port=port,
-            workspace=workspace,
-            default_timeout_seconds=default_timeout,
-            max_timeout_seconds=max_timeout,
-            max_output_chars=max_output,
-            max_command_chars=max_command,
-            max_concurrent_commands=max_concurrent,
-            max_request_bytes=max_request_bytes,
+            host=os.getenv("REMOTE_CODING_AGENT_HOST", "127.0.0.1").strip(),
+            port=setting("REMOTE_CODING_AGENT_PORT", 8000),
+            workspace=Path(os.getenv("REMOTE_CODING_AGENT_WORKSPACE", "./workspace")).expanduser(),
+            default_timeout_seconds=setting("REMOTE_CODING_AGENT_DEFAULT_TIMEOUT_SECONDS", 120),
+            max_timeout_seconds=setting("REMOTE_CODING_AGENT_MAX_TIMEOUT_SECONDS", 3600),
+            command_queue_timeout_seconds=setting(
+                "REMOTE_CODING_AGENT_COMMAND_QUEUE_TIMEOUT_SECONDS", 30
+            ),
+            session_idle_timeout_seconds=setting(
+                "REMOTE_CODING_AGENT_SESSION_IDLE_TIMEOUT_SECONDS", 86400
+            ),
+            max_sessions=setting("REMOTE_CODING_AGENT_MAX_SESSIONS", 256),
+            max_queued_commands=setting("REMOTE_CODING_AGENT_MAX_QUEUED_COMMANDS", 64),
+            max_output_chars=setting("REMOTE_CODING_AGENT_MAX_OUTPUT_CHARS", 20_000),
+            max_command_chars=setting("REMOTE_CODING_AGENT_MAX_COMMAND_CHARS", 16_384),
+            max_concurrent_commands=setting("REMOTE_CODING_AGENT_MAX_CONCURRENT_COMMANDS", 4),
+            max_request_bytes=setting("REMOTE_CODING_AGENT_MAX_REQUEST_BYTES", 1_048_576),
             test_mode=test_mode,
         )

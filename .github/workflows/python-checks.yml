@@ -38,4 +38,6 @@ jobs:
                   compile("".join(cell.get("source", [])), f"notebook-cell-{index}", "exec", flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
           PY
       - name: Validate Ubuntu scripts
-        run: bash -n scripts/setup-ubuntu.sh scripts/up.sh
+        run: bash -n scripts/setup-ubuntu.sh scripts/up.sh scripts/server-supervisor.sh scripts/tunnel-client-supervisor.sh
+      - name: Validate soak-test CLI
+        run: uv run python scripts/soak-test.py --help

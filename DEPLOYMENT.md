@@ -177,3 +177,40 @@ git pull --ff-only
 ```
 
 Then restart with `./scripts/up.sh`. Review the diff before pulling if you have made local changes.
+
+
+## 9. Long-running operation and self-healing
+
+The native Ubuntu launcher is configured for long-running sessions:
+
+- MCP sessions may remain idle for up to 24 hours; the default session capacity is 256.
+- Commands have a 120-second default timeout and a 3600-second maximum.
+- Four commands execute concurrently by default. A bounded queue holds up to 64 additional commands, with a 30-second wait limit.
+- The MCP supervisor restarts exited processes and terminates/restarts a process after repeated failed local HTTP health checks.
+- The tunnel supervisor uses a 24-hour connection TTL, checks the tunnel readiness and OpenAI control-plane polling state, and restarts an unhealthy or exited client.
+- Both supervisors use exponential restart backoff from 2 to 60 seconds and reset the delay after a stable five-minute run.
+- MCP application logs rotate at 10 MiB with five backups. Supervisor logs rotate as well.
+
+To keep the launcher attached to a persistent terminal across SSH disconnects:
+
+```bash
+tmux new -s remote-agent ./scripts/up.sh
+```
+
+Detach with `Ctrl+B`, then `D`. Reattach with `tmux attach -t remote-agent`. To stop it, reattach and press `Ctrl+C`. The launcher intentionally remains in the foreground inside tmux so you can observe readiness and stop it cleanly.
+
+### Run the reliability soak test
+
+The harness repeatedly initializes MCP sessions, exercises command execution, verifies timeout and output-truncation behavior, reconnects clients periodically, and optionally monitors tunnel health:
+
+```bash
+cd ~/projects/remote-coding-agent
+uv run python scripts/soak-test.py \
+  --url http://127.0.0.1:8000/mcp \
+  --health-url http://127.0.0.1:18080 \
+  --duration-seconds 86400 \
+  --concurrency 8 \
+  --report /tmp/remote-agent-soak-report.json
+```
+
+The default duration is 86400 seconds (24 hours). Run it in another tmux window while the agent is serving requests. It exits non-zero on command failures, transport failures, or failed health checks. A 24-hour configuration is not proof of 24-hour stability: qualification still requires completing the soak test on the target machine and reviewing its report. Colab remains an ephemeral runtime and is not covered by the Ubuntu process supervisors.

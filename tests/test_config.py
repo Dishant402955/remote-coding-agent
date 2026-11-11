@@ -33,6 +33,10 @@ def test_valid_environment_uses_safe_defaults(monkeypatch: pytest.MonkeyPatch) -
         "REMOTE_CODING_AGENT_WORKSPACE",
         "REMOTE_CODING_AGENT_DEFAULT_TIMEOUT_SECONDS",
         "REMOTE_CODING_AGENT_MAX_TIMEOUT_SECONDS",
+        "REMOTE_CODING_AGENT_COMMAND_QUEUE_TIMEOUT_SECONDS",
+        "REMOTE_CODING_AGENT_SESSION_IDLE_TIMEOUT_SECONDS",
+        "REMOTE_CODING_AGENT_MAX_SESSIONS",
+        "REMOTE_CODING_AGENT_MAX_QUEUED_COMMANDS",
         "REMOTE_CODING_AGENT_MAX_OUTPUT_CHARS",
         "REMOTE_CODING_AGENT_MAX_COMMAND_CHARS",
         "REMOTE_CODING_AGENT_MAX_CONCURRENT_COMMANDS",
@@ -45,8 +49,12 @@ def test_valid_environment_uses_safe_defaults(monkeypatch: pytest.MonkeyPatch) -
 
     assert settings.host == "127.0.0.1"
     assert settings.port == 8000
-    assert settings.default_timeout_seconds == 30
-    assert settings.max_timeout_seconds == 300
+    assert settings.default_timeout_seconds == 120
+    assert settings.max_timeout_seconds == 3600
+    assert settings.command_queue_timeout_seconds == 30
+    assert settings.session_idle_timeout_seconds == 86400
+    assert settings.max_sessions == 256
+    assert settings.max_queued_commands == 64
     assert settings.max_output_chars == 20_000
     assert settings.max_command_chars == 16_384
     assert settings.max_concurrent_commands == 4
@@ -124,4 +132,24 @@ def test_invalid_test_mode_environment_flag_is_rejected(
     monkeypatch.setenv("REMOTE_CODING_AGENT_TEST_MODE", "sometimes")
 
     with pytest.raises(ConfigurationError, match="TEST_MODE"):
+        Settings.from_env()
+
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("REMOTE_CODING_AGENT_COMMAND_QUEUE_TIMEOUT_SECONDS", "301"),
+        ("REMOTE_CODING_AGENT_SESSION_IDLE_TIMEOUT_SECONDS", "59"),
+        ("REMOTE_CODING_AGENT_MAX_SESSIONS", "10001"),
+        ("REMOTE_CODING_AGENT_MAX_QUEUED_COMMANDS", "1025"),
+    ],
+)
+def test_invalid_reliability_settings_are_rejected(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv("REMOTE_CODING_AGENT_AUTH_MODE", "none")
+    monkeypatch.delenv("MCP_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ConfigurationError):
         Settings.from_env()
