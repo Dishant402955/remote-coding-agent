@@ -1,5 +1,6 @@
 """Run the Remote Coding Agent MCP server."""
 from __future__ import annotations
+
 import asyncio
 import ctypes
 import logging
@@ -8,6 +9,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
+
 import uvicorn
 from mcp.server.fastmcp import FastMCP
 from remote_coding_agent.auth import BearerTokenMiddleware
@@ -94,7 +96,10 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
         if not isinstance(command, str) or len(command) > settings.max_command_chars:
             return {
                 "stdout": "",
-                "stderr": f"command must be a string no longer than {settings.max_command_chars} characters",
+                "stderr": (
+                    "command must be a string no longer than "
+                    f"{settings.max_command_chars} characters"
+                ),
                 "exit_code": 2, "timed_out": False, "output_truncated": False,
                 "duration_seconds": 0.0,
             }

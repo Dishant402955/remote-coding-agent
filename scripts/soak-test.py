@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run a long-duration MCP soak test with periodic reconnects and health checks."""
 from __future__ import annotations
+
 import argparse
 import asyncio
 import json
@@ -8,6 +9,7 @@ import time
 from collections import Counter
 from pathlib import Path
 from typing import Any
+
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
