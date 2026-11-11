@@ -32,6 +32,17 @@ trap stop_child EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
+terminate_child() {
+  [[ -n "$CHILD_PID" ]] || return 0
+  kill -TERM -- "-$CHILD_PID" 2>/dev/null || true
+  for _ in {1..50}; do
+    state="$(ps -o stat= -p "$CHILD_PID" 2>/dev/null || true)"
+    state="${state//[[:space:]]/}"
+    [[ -n "$state" && "$state" != Z* ]] || break
+    sleep 0.1
+  done
+  kill -KILL -- "-$CHILD_PID" 2>/dev/null || true
+}
 check_health() {
   local status
   status="$(curl -sS --max-time 4 -o /dev/null -w '%{http_code}' "$HEALTH_URL" 2>/dev/null || true)"
@@ -58,7 +69,7 @@ while true; do
       fi
       if ((failures >= HEALTH_FAILURE_LIMIT)); then
         log "server unhealthy; terminating child process group"
-        kill -TERM -- "-$CHILD_PID" 2>/dev/null || true
+        terminate_child
         break
       fi
       sleep "$HEALTH_INTERVAL" &

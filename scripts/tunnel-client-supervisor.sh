@@ -19,6 +19,17 @@ log() {
   fi
   printf '%s %s\n' "$(date -Is)" "$*" >> "$LOG_FILE"
 }
+terminate_child() {
+  [[ -n "$CHILD_PID" ]] || return 0
+  kill -TERM -- "-$CHILD_PID" 2>/dev/null || true
+  for _ in {1..50}; do
+    state="$(ps -o stat= -p "$CHILD_PID" 2>/dev/null || true)"
+    state="${state//[[:space:]]/}"
+    [[ -n "$state" && "$state" != Z* ]] || break
+    sleep 0.1
+  done
+  kill -KILL -- "-$CHILD_PID" 2>/dev/null || true
+}
 check_health() {
   [[ -n "$HEALTH_URL" ]] || return 0
   curl -fsS --max-time 5 "$HEALTH_URL/healthz" >/dev/null 2>&1 || return 1
@@ -73,7 +84,7 @@ while true; do
       fi
       if ((failures >= HEALTH_FAILURE_LIMIT)); then
         log "tunnel unhealthy; terminating child process group"
-        kill -TERM -- "-$CHILD_PID" 2>/dev/null || true
+        terminate_child
         break
       fi
     fi

@@ -30,7 +30,7 @@ After a reboot or whenever you want to reconnect, start a tmux session and run:
 
 ```bash
 cd ~/projects/remote-coding-agent   # replace this if your clone is elsewhere
-./scripts/up.sh
+tmux new -s remote-agent ./scripts/up.sh
 ```
 
 You do not need to reinstall Python or the tunnel client each time. You do need to authorize sudo and enter the tunnel ID and runtime API key at each start. Keep using your existing ChatGPT connector and tunnel; do not create a new one just for a reboot.

@@ -198,7 +198,7 @@ done
 sudo -K
 log "Waiting for tunnel readiness and successful control-plane polling"
 tunnel_ready=0
-for _ in {1..180}; do
+for _ in {1..600}; do
   if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
     tail -60 "$TUNNEL_CLIENT_LOG" >&2 || true
     tail -60 "$TUNNEL_SUPERVISOR_LOG" >&2 || true
