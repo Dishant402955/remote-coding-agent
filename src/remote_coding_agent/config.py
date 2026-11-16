@@ -33,7 +33,7 @@ class Settings:
     default_timeout_seconds: int = 120
     max_timeout_seconds: int = 3600
     command_queue_timeout_seconds: int = 30
-    session_idle_timeout_seconds: int = 86400
+    session_idle_timeout_seconds: int = 604800
     max_sessions: int = 256
     max_queued_commands: int = 64
     max_output_chars: int = 20_000
@@ -131,7 +131,7 @@ class Settings:
                 "REMOTE_CODING_AGENT_COMMAND_QUEUE_TIMEOUT_SECONDS", 30
             ),
             session_idle_timeout_seconds=setting(
-                "REMOTE_CODING_AGENT_SESSION_IDLE_TIMEOUT_SECONDS", 86400
+                "REMOTE_CODING_AGENT_SESSION_IDLE_TIMEOUT_SECONDS", 604800
             ),
             max_sessions=setting("REMOTE_CODING_AGENT_MAX_SESSIONS", 256),
             max_queued_commands=setting("REMOTE_CODING_AGENT_MAX_QUEUED_COMMANDS", 64),

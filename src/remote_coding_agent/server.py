@@ -4,14 +4,14 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import logging
-import os
 import sys
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from remote_coding_agent.auth import BearerTokenMiddleware
 from remote_coding_agent.config import Settings
@@ -34,21 +34,15 @@ def _disable_linux_process_inspection() -> None:
 
 
 def _configure_logging() -> None:
-    """Configure bounded rotating logs without logging commands or secrets."""
-    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
-    log_path = os.getenv("REMOTE_CODING_AGENT_LOG_FILE", "").strip()
-    if log_path:
-        path = Path(log_path).expanduser()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(RotatingFileHandler(
-            path, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
-        ))
+    """Send concise application logs to stdout; the supervisor rotates this stream."""
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=handlers,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
         force=True,
     )
+    for name in ("uvicorn.access", "mcp", "httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").disabled = True
 
 
@@ -78,6 +72,16 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
     execution_slots = asyncio.Semaphore(settings.max_concurrent_commands)
     queue_lock = asyncio.Lock()
     queued_commands = 0
+
+    @mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
+    async def healthz(_: Request) -> JSONResponse:
+        """Return liveness for the MCP server process."""
+        return JSONResponse({"status": "ok"})
+
+    @mcp.custom_route("/readyz", methods=["GET"], include_in_schema=False)
+    async def readyz(_: Request) -> JSONResponse:
+        """Return readiness once the ASGI application has started."""
+        return JSONResponse({"status": "ready", "service": "remote-coding-agent"})
 
     @mcp.tool()
     async def run_command(

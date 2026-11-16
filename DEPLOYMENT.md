@@ -36,7 +36,7 @@ cd remote-coding-agent
 ./scripts/setup-ubuntu.sh
 ```
 
-The setup script is safe to rerun when `scripts/up.sh` is not running. It asks for sudo authorization and then:
+For a fresh machine, `bootstrap/setup-remote-coding-agent.sh` is the one-shot setup entry point. It clones the latest `main`, runs this installer, and starts `scripts/up.sh` in a `tmux` session. It intentionally refuses to overwrite an existing project directory or attach to a pre-existing session. The setup script is safe to rerun when `scripts/up.sh` is not running. It asks for sudo authorization and then:
 
 1. Checks the OS and CPU architecture.
 2. Installs missing Ubuntu prerequisites with `apt` when needed.
@@ -137,7 +137,9 @@ curl -fsS http://127.0.0.1:18080/health/control-plane; echo
 
 Expected responses are `live` and `ready`. The control-plane JSON should contain `"status":"ok"`, a non-empty `details.last_success`, and `details.consecutive_failures` equal to `0`. Override the health listener with `REMOTE_CODING_AGENT_HEALTH_PORT=18081` if port 18080 is already occupied.
 
-The MCP server log is at `/tmp/remote-coding-agent-server.log`.
+The MCP readiness endpoints are `http://127.0.0.1:8000/healthz` and `/readyz`. The tunnel-client health listener is `http://127.0.0.1:18080/healthz`, `/readyz`, and `/health/control-plane`.
+
+The main logs are `/tmp/remote-coding-agent-server-child.log` and `/tmp/remote-coding-agent-server-supervisor.log`. Tunnel logs are `/tmp/remote-coding-agent-tunnel-client.log` and `/tmp/remote-coding-agent-tunnel-supervisor.log`; they are owned by the isolated tunnel service account, so inspect them with `sudo tail -40 <path>`.
 
 ## 7. Troubleshooting
 
@@ -183,13 +185,14 @@ Then restart with `./scripts/up.sh`. Review the diff before pulling if you have 
 
 The native Ubuntu launcher is configured for long-running sessions:
 
-- MCP sessions may remain idle for up to 24 hours; the default session capacity is 256.
+- MCP sessions may remain idle for up to seven days (604800 seconds); the default session capacity is 256.
 - Commands have a 120-second default timeout and a 3600-second maximum.
 - Four commands execute concurrently by default. A bounded queue holds up to 64 additional commands, with a 30-second wait limit.
-- The MCP supervisor restarts exited processes and terminates/restarts a process after repeated failed local HTTP health checks.
-- The tunnel supervisor uses a 24-hour connection TTL, checks the tunnel readiness and OpenAI control-plane polling state, and restarts an unhealthy or exited client.
-- Both supervisors use exponential restart backoff from 2 to 60 seconds and reset the delay after a stable five-minute run.
-- MCP application logs rotate at 10 MiB with five backups. Supervisor logs rotate as well.
+- The MCP supervisor checks the exact `/readyz` endpoint. It does not treat a generic HTTP 404 as healthy. After three consecutive failures following startup grace, it terminates the whole process group and restarts the server.
+- The tunnel supervisor checks `/healthz`, `/readyz`, and successful OpenAI control-plane polling. After three consecutive misses following startup grace, it replaces the tunnel client.
+- Both supervisors use exponential restart backoff from 2 to 60 seconds and reset the delay after a stable five-minute run. They print concise state transitions to the foreground console and retain bounded status/client logs under `/tmp/`.
+- Server output is copy-truncated at 10 MiB to keep a bounded current/previous log pair. Tunnel-client output retains up to three 10 MiB rotations; the dedicated tunnel account owns these files, so inspect them with `sudo`.
+- The launcher holds a `flock` single-instance lock and requests a systemd inhibitor for sleep, idle, and lid-close while it is running. A seven-day run still requires the host to remain powered, connected to the network, and not manually shut down.
 
 To keep the launcher attached to a persistent terminal across SSH disconnects:
 
@@ -208,9 +211,9 @@ cd ~/projects/remote-coding-agent
 uv run python scripts/soak-test.py \
   --url http://127.0.0.1:8000/mcp \
   --health-url http://127.0.0.1:18080 \
-  --duration-seconds 86400 \
+  --duration-seconds 604800 \
   --concurrency 8 \
   --report /tmp/remote-agent-soak-report.json
 ```
 
-The default duration is 86400 seconds (24 hours). Run it in another tmux window while the agent is serving requests. It exits non-zero on command failures, transport failures, or failed health checks. A 24-hour configuration is not proof of 24-hour stability: qualification still requires completing the soak test on the target machine and reviewing its report. Colab remains an ephemeral runtime and is not covered by the Ubuntu process supervisors.
+The default duration is 604800 seconds (seven days). Run it in another tmux window while the agent is serving requests. It exits non-zero on command failures, transport failures, or failed health checks. Seven-day configuration is not proof of seven-day stability: qualification still requires completing the soak test on the target machine and reviewing its report. Colab remains an ephemeral runtime and is not covered by the Ubuntu process supervisors.

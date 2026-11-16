@@ -52,7 +52,7 @@ def test_valid_environment_uses_safe_defaults(monkeypatch: pytest.MonkeyPatch) -
     assert settings.default_timeout_seconds == 120
     assert settings.max_timeout_seconds == 3600
     assert settings.command_queue_timeout_seconds == 30
-    assert settings.session_idle_timeout_seconds == 86400
+    assert settings.session_idle_timeout_seconds == 604800
     assert settings.max_sessions == 256
     assert settings.max_queued_commands == 64
     assert settings.max_output_chars == 20_000
@@ -141,6 +141,7 @@ def test_invalid_test_mode_environment_flag_is_rejected(
     [
         ("REMOTE_CODING_AGENT_COMMAND_QUEUE_TIMEOUT_SECONDS", "301"),
         ("REMOTE_CODING_AGENT_SESSION_IDLE_TIMEOUT_SECONDS", "59"),
+        ("REMOTE_CODING_AGENT_SESSION_IDLE_TIMEOUT_SECONDS", "604801"),
         ("REMOTE_CODING_AGENT_MAX_SESSIONS", "10001"),
         ("REMOTE_CODING_AGENT_MAX_QUEUED_COMMANDS", "1025"),
     ],

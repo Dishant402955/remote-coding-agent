@@ -161,7 +161,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8000/mcp")
-    parser.add_argument("--duration-seconds", type=int, default=86400)
+    parser.add_argument("--duration-seconds", type=int, default=604800)
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--reconnect-every", type=int, default=100)
     parser.add_argument("--health-url", default="")

@@ -345,3 +345,19 @@ def test_command_queue_wait_timeout_returns_busy_result(
     result = asyncio.run(scenario())
     assert result["exit_code"] == 75
     assert "waited too long" in result["stderr"]
+
+
+def test_health_and_readiness_endpoints_are_explicit_and_public(tmp_path) -> None:
+    _, app = create_server(Settings(auth_token=AUTH_TOKEN, workspace=tmp_path))
+    with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+        live = client.get("/healthz")
+        ready = client.get("/readyz")
+        missing = client.get(
+            "/not-a-health-route", headers={"Authorization": f"Bearer {AUTH_TOKEN}"}
+        )
+
+    assert live.status_code == 200
+    assert live.json() == {"status": "ok"}
+    assert ready.status_code == 200
+    assert ready.json() == {"status": "ready", "service": "remote-coding-agent"}
+    assert missing.status_code == 404

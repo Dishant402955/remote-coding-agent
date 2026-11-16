@@ -35,28 +35,38 @@ def test_server_supervisor_restarts_crashed_child(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     log = tmp_path / "server.log"
+    clean_env = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith("REMOTE_CODING_AGENT_")
+    }
+    clean_env["REMOTE_CODING_AGENT_CHILD_LOG_FILE"] = str(tmp_path / "server-child.log")
     process = subprocess.Popen(
         ["bash", str(SERVER), str(log), sys.executable, str(child)],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        start_new_session=True,
+        env=clean_env, start_new_session=True,
     )
     try:
         wait_for(lambda: count.exists() and int(count.read_text()) >= 2)
-        assert "restarting server" in log.read_text()
+        assert "STATUS: RESTARTING" in log.read_text()
     finally:
         process.terminate()
         process.wait(timeout=8)
+    log_text = log.read_text()
+    assert "STATUS: STOPPING" in log_text
+    assert "STATUS: STOPPED" in log_text
 
 
 @pytest.mark.skipif(os.name != "posix", reason="process-group supervision is POSIX-specific")
 def test_tunnel_supervisor_restarts_with_24h_ttl_and_hides_key(tmp_path: Path) -> None:
     calls = tmp_path / "calls"
     key_seen = tmp_path / "key-seen"
+    args_seen = tmp_path / "args-seen"
     fake = tmp_path / "tunnel-client"
     fake.write_text(
         "#!/usr/bin/env bash\n"
         'if [[ "$1" == "doctor" ]]; then exit 0; fi\n'
         f"printf '%s\\n' \"$*\" >> {str(calls)!r}\n"
+        f"printf '%s' \"$*\" > {str(args_seen)!r}\n"
         f"printf '%s' \"$CONTROL_PLANE_API_KEY\" > {str(key_seen)!r}\n"
         "exit 17\n",
         encoding="utf-8",
@@ -70,7 +80,11 @@ def test_tunnel_supervisor_restarts_with_24h_ttl_and_hides_key(tmp_path: Path) -
             ["bash", str(TUNNEL), str(fake), "http://127.0.0.1:8000/mcp",
              str(log), "24h", ""],
             stdin=subprocess.PIPE, stdout=output, stderr=subprocess.STDOUT,
-            env={**os.environ, "CONTROL_PLANE_TUNNEL_ID": "tunnel_test"},
+            env={
+                **{key: value for key, value in os.environ.items()
+                   if not key.startswith("REMOTE_CODING_AGENT_")},
+                "CONTROL_PLANE_TUNNEL_ID": "tunnel_test",
+            },
             start_new_session=True,
         )
         assert process.stdin is not None
@@ -85,3 +99,161 @@ def test_tunnel_supervisor_restarts_with_24h_ttl_and_hides_key(tmp_path: Path) -
     assert "--mcp.connection-max-ttl=24h" in calls.read_text()
     assert secret not in log.read_text()
     assert secret not in client_log.read_text()
+    assert secret not in args_seen.read_text()
+    status_log = log.read_text()
+    assert "STATUS: STARTING" in status_log
+    assert "STATUS: RESTARTING" in status_log
+    assert "STATUS: STOPPING" in status_log
+    assert "STATUS: STOPPED" in status_log
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process-group supervision is POSIX-specific")
+def test_tunnel_supervisor_restarts_after_control_plane_health_fails(
+    tmp_path: Path,
+) -> None:
+    calls = tmp_path / "calls"
+    fake_client = tmp_path / "tunnel-client"
+    fake_client.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == "doctor" ]]; then exit 0; fi\n'
+        f"printf 'started\\n' >> {str(calls)!r}\n"
+        "sleep 30 &\n"
+        "wait $!\n",
+        encoding="utf-8",
+    )
+    fake_client.chmod(0o755)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_curl = fake_bin / "curl"
+    fake_curl.write_text(
+        "#!/usr/bin/env bash\n"
+        'for arg in "$@"; do url="$arg"; done\n'
+        'case "$url" in\n'
+        '  */healthz) printf live; exit 0 ;;\n'
+        '  */readyz) printf ready; exit 0 ;;\n'
+        '  */health/control-plane) printf \'{"status":"down"}\'; exit 0 ;;\n'
+        '  *) exit 1 ;;\n'
+        'esac\n',
+        encoding="utf-8",
+    )
+    fake_curl.chmod(0o755)
+
+    log = tmp_path / "tunnel-supervisor.log"
+    client_log = tmp_path / "client.log"
+    env = {
+        **{key: value for key, value in os.environ.items()
+           if not key.startswith("REMOTE_CODING_AGENT_")},
+        "PATH": f"{fake_bin}:/usr/local/bin:/usr/bin:/bin",
+        "CONTROL_PLANE_TUNNEL_ID": "tunnel_test",
+        "REMOTE_CODING_AGENT_TUNNEL_HEALTH_INTERVAL_SECONDS": "0.1",
+        "REMOTE_CODING_AGENT_TUNNEL_STARTUP_GRACE_SECONDS": "0",
+        "REMOTE_CODING_AGENT_TUNNEL_HEALTH_FAILURE_LIMIT": "2",
+        "REMOTE_CODING_AGENT_TUNNEL_CLIENT_LOG": str(client_log),
+    }
+    with client_log.open("w", encoding="utf-8") as output:
+        process = subprocess.Popen(
+            ["bash", str(TUNNEL), str(fake_client), "http://127.0.0.1:8000/mcp",
+             str(log), "24h", "http://127.0.0.1:18080"],
+            stdin=subprocess.PIPE, stdout=output, stderr=subprocess.STDOUT,
+            env=env, start_new_session=True,
+        )
+        assert process.stdin is not None
+        process.stdin.write(b"test-key\n")
+        process.stdin.close()
+        try:
+            wait_for(lambda: calls.exists() and len(calls.read_text().splitlines()) >= 2,
+                     timeout=8.0)
+            status_log = log.read_text()
+            assert "STATUS: DEGRADED" in status_log
+            assert "STATUS: RESTARTING" in status_log
+        finally:
+            process.terminate()
+            process.wait(timeout=8)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process-group supervision is POSIX-specific")
+def test_tunnel_supervisor_terminates_child_process_group_on_shutdown(
+    tmp_path: Path,
+) -> None:
+    child_pid_file = tmp_path / "grandchild.pid"
+    fake_client = tmp_path / "tunnel-client"
+    fake_client.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == "doctor" ]]; then exit 0; fi\n'
+        "sleep 60 &\n"
+        f"printf '%s' \"$!\" > {str(child_pid_file)!r}\n"
+        "wait $!\n",
+        encoding="utf-8",
+    )
+    fake_client.chmod(0o755)
+    log = tmp_path / "supervisor.log"
+    client_log = tmp_path / "client.log"
+    env = {
+        **{key: value for key, value in os.environ.items()
+           if not key.startswith("REMOTE_CODING_AGENT_")},
+        "CONTROL_PLANE_TUNNEL_ID": "tunnel_test",
+        "REMOTE_CODING_AGENT_TUNNEL_CLIENT_LOG": str(client_log),
+    }
+    with client_log.open("w", encoding="utf-8") as output:
+        process = subprocess.Popen(
+            ["bash", str(TUNNEL), str(fake_client), "http://127.0.0.1:8000/mcp",
+             str(log), "24h", ""],
+            stdin=subprocess.PIPE, stdout=output, stderr=subprocess.STDOUT,
+            env=env, start_new_session=True,
+        )
+        assert process.stdin is not None
+        process.stdin.write(b"test-key\n")
+        process.stdin.close()
+        try:
+            wait_for(child_pid_file.exists)
+            grandchild_pid = int(child_pid_file.read_text())
+            process.terminate()
+            process.wait(timeout=8)
+
+            def child_is_gone() -> bool:
+                try:
+                    os.kill(grandchild_pid, 0)
+                except ProcessLookupError:
+                    return True
+                status_path = Path(f"/proc/{grandchild_pid}/stat")
+                if status_path.exists():
+                    return status_path.read_text().split()[2] == "Z"
+                return False
+
+            wait_for(child_is_gone, timeout=4.0)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=8)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process supervision is POSIX-specific")
+def test_server_supervisor_stops_promptly_during_restart_backoff(
+    tmp_path: Path,
+) -> None:
+    child = tmp_path / "exit.py"
+    child.write_text("raise SystemExit(9)\n", encoding="utf-8")
+    log = tmp_path / "supervisor.log"
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith("REMOTE_CODING_AGENT_")
+    }
+    env["REMOTE_CODING_AGENT_CHILD_LOG_FILE"] = str(tmp_path / "child.log")
+    process = subprocess.Popen(
+        ["bash", str(SERVER), str(log), sys.executable, str(child)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env=env, start_new_session=True,
+    )
+    try:
+        wait_for(lambda: log.exists() and "STATUS: RESTARTING" in log.read_text())
+        started = time.monotonic()
+        process.terminate()
+        process.wait(timeout=3)
+        assert time.monotonic() - started < 3
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+    assert "STATUS: STOPPING" in log.read_text()
+    assert "STATUS: STOPPED" in log.read_text()

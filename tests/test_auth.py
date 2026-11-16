@@ -179,3 +179,51 @@ def test_middleware_can_skip_auth_while_still_dispatching_request() -> None:
     }
     asyncio.run(BearerTokenMiddleware(app, None)(scope, receive, send))
     assert called
+
+
+def test_public_health_get_skips_bearer_auth_only_for_exact_paths() -> None:
+    called = []
+
+    async def app(scope, receive, send):
+        called.append((scope["method"], scope["path"]))
+        await receive()
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        pass
+
+    middleware = BearerTokenMiddleware(app, "secret-token")
+    for method, path in (("GET", "/healthz"), ("GET", "/readyz")):
+        asyncio.run(middleware(
+            {"type": "http", "method": method, "path": path, "headers": []},
+            receive, send,
+        ))
+    assert called == [("GET", "/healthz"), ("GET", "/readyz")]
+
+
+def test_health_route_does_not_bypass_auth_for_other_methods_or_paths() -> None:
+    sent = []
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    middleware = BearerTokenMiddleware(app, "secret-token")
+    for method, path in (("POST", "/healthz"), ("GET", "/mcp")):
+        called = False
+        sent.clear()
+        asyncio.run(middleware(
+            {"type": "http", "method": method, "path": path, "headers": []},
+            receive, send,
+        ))
+        assert not called
+        assert sent[0]["status"] == 401

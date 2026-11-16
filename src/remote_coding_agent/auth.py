@@ -72,7 +72,11 @@ class BearerTokenMiddleware:
             for key, value in headers
             if key.lower() == b"authorization"
         ]
-        if self.expected_token is not None and (
+        is_public_health_check = (
+            scope.get("method") == "GET"
+            and scope.get("path") in {"/healthz", "/readyz"}
+        )
+        if self.expected_token is not None and not is_public_health_check and (
             len(authorization_headers) != 1
             or not token_matches(authorization_headers[0], self.expected_token)
         ):

@@ -138,3 +138,17 @@ def test_cancellation_terminates_running_command(tmp_path: Path) -> None:
             await asyncio.wait_for(task, timeout=3)
 
     asyncio.run(scenario())
+
+
+def test_child_process_does_not_receive_runtime_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REMOTE_CODING_AGENT_AUTH_MODE", "none")
+    monkeypatch.setenv("REMOTE_CODING_AGENT_WORKSPACE", "/private/agent/path")
+    monkeypatch.setenv("REMOTE_CODING_AGENT_SUPERVISOR_HEALTH_URL", "http://127.0.0.1:8000/readyz")
+    result = run(
+        'printf "%s|%s|%s" "$REMOTE_CODING_AGENT_AUTH_MODE" '
+        '"$REMOTE_CODING_AGENT_WORKSPACE" "$REMOTE_CODING_AGENT_SUPERVISOR_HEALTH_URL"',
+        tmp_path,
+    )
+    assert result["stdout"] == "||"

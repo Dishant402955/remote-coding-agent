@@ -29,7 +29,11 @@ def _command_environment() -> dict[str, str]:
     return {
         name: value
         for name, value in os.environ.items()
-        if name not in excluded and not _SECRET_ENV_NAME.search(name)
+        if (
+            name not in excluded
+            and not name.startswith("REMOTE_CODING_AGENT_")
+            and not _SECRET_ENV_NAME.search(name)
+        )
     }
 
 

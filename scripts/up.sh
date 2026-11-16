@@ -1,7 +1,19 @@
 #!/usr/bin/env bash
-# Start supervised MCP and Secure MCP Tunnel processes.
+# Start the MCP server and Secure MCP Tunnel with supervised, visible status.
 set -Eeuo pipefail
 umask 077
+
+# Prevent automatic suspend/idle sleep while the seven-day runtime is active.
+if [[ "${REMOTE_CODING_AGENT_INHIBITED:-0}" != "1" ]] && command -v systemd-inhibit >/dev/null 2>&1; then
+  export REMOTE_CODING_AGENT_INHIBITED=1
+  exec systemd-inhibit \
+    --what=sleep:idle:handle-lid-switch \
+    --who="Remote Coding Agent" \
+    --why="Keep the supervised coding agent available" \
+    --mode=block \
+    "$BASH" "$0" "$@"
+fi
+
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVER="$ROOT/.venv/bin/remote-coding-agent"
 PYTHON="$ROOT/.venv/bin/python"
@@ -15,53 +27,100 @@ TUNNEL_PATH="$SYSTEM_BASE/tunnel-client:/usr/bin:/bin"
 WORKSPACE="$ROOT/workspace"
 PORT="$(printenv REMOTE_CODING_AGENT_PORT || printf '8000')"
 HEALTH_PORT="$(printenv REMOTE_CODING_AGENT_HEALTH_PORT || printf '18080')"
-SERVER_LOG="/tmp/remote-coding-agent-server.log"
 SERVER_SUPERVISOR_LOG="/tmp/remote-coding-agent-server-supervisor.log"
+SERVER_CHILD_LOG="/tmp/remote-coding-agent-server-child.log"
 TUNNEL_CLIENT_LOG="/tmp/remote-coding-agent-tunnel-client.log"
 TUNNEL_SUPERVISOR_LOG="/tmp/remote-coding-agent-tunnel-supervisor.log"
 MCP_SERVER_URL="http://127.0.0.1:${PORT}/mcp"
+MCP_READY_URL="http://127.0.0.1:${PORT}/readyz"
 HEALTH_URL="http://127.0.0.1:${HEALTH_PORT}"
 SERVER_PID=""
 TUNNEL_PID=""
 CONTROL_PLANE_TUNNEL_ID=""
 CONTROL_PLANE_API_KEY=""
+STATE="STOPPED"
 export -n CONTROL_PLANE_TUNNEL_ID CONTROL_PLANE_API_KEY 2>/dev/null || true
-log() { printf '\n==> %s\n' "$*"; }
-die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+
+status() {
+  local next="$1"; shift
+  [[ "$STATE" != "$next" ]] || return 0
+  printf '%s | STATUS: %s | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$next" "$*"
+  STATE="$next"
+}
+info() { printf '%s | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+die() { printf '%s | STATUS: FAILED | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; exit 1; }
 port_is_open() { local port="$1"; (echo > "/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1; }
-stop_pid() {
+
+stop_process() {
   local pid="${1:-}"
   [[ -n "$pid" ]] || return 0
   if kill -0 "$pid" 2>/dev/null; then
     kill -TERM "$pid" 2>/dev/null || true
-    for _ in {1..50}; do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+    for _ in {1..50}; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
     kill -KILL "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   fi
 }
+
 cleanup() {
   local exit_status=$?
   trap - EXIT INT TERM HUP
+  status STOPPING "shutting down managed processes"
+  cleanup_complete=1
+
   if [[ -n "$TUNNEL_PID" ]]; then
-    printf '\nStopping isolated tunnel processes. sudo authentication may be requested.\n'
     if sudo -v; then
       sudo -n /usr/bin/pkill -TERM -u "$TUNNEL_USER" 2>/dev/null || true
-      sleep 0.5
-      sudo -n /usr/bin/pkill -KILL -u "$TUNNEL_USER" 2>/dev/null || true
-      stop_pid "$TUNNEL_PID"
+      tunnel_stopped=0
+      for _ in {1..100}; do
+        if ! sudo -n /usr/bin/pgrep -u "$TUNNEL_USER" >/dev/null 2>&1; then
+          tunnel_stopped=1
+          break
+        fi
+        sleep 0.1
+      done
+      if ((tunnel_stopped == 0)); then
+        info "Tunnel did not stop within 10 seconds; forcing remaining tunnel processes to exit"
+        sudo -n /usr/bin/pkill -KILL -u "$TUNNEL_USER" 2>/dev/null || true
+        sleep 0.2
+        if sudo -n /usr/bin/pgrep -u "$TUNNEL_USER" >/dev/null 2>&1; then
+          cleanup_complete=0
+        fi
+      fi
+      stop_process "$TUNNEL_PID"
       sudo -K 2>/dev/null || true
     else
-      printf 'Could not authenticate to stop the isolated tunnel account; stop it manually.\n' >&2
+      printf 'STATUS: WARNING | Could not authenticate to stop tunnel service account %s.\n' "$TUNNEL_USER" >&2
+      cleanup_complete=0
     fi
   fi
-  stop_pid "$SERVER_PID"
+
+  stop_process "$SERVER_PID"
   unset CONTROL_PLANE_API_KEY CONTROL_PLANE_TUNNEL_ID
+  sudo -K 2>/dev/null || true
+  if ((cleanup_complete)); then
+    status STOPPED "server and tunnel process trees stopped (exit=$exit_status)"
+  else
+    status STOPPED "server stopped; tunnel cleanup still needs sudo for $TUNNEL_USER"
+  fi
   exit "$exit_status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
+
+[[ -t 0 && -t 1 ]] || die "Run this script in an interactive terminal (tmux is recommended)."
+command -v flock >/dev/null 2>&1 || die "flock is missing. Install util-linux and retry."
+LOCK_DIR="$HOME/.cache/remote-coding-agent"
+mkdir -p "$LOCK_DIR"
+chmod 700 "$LOCK_DIR"
+exec 9>"$LOCK_DIR/up.lock"
+flock -n 9 || die "Another Remote Coding Agent launcher is already running for this user."
+
 [[ -x "$SERVER" && -x "$PYTHON" ]] || die "Python environment missing. Run scripts/setup-ubuntu.sh first."
 [[ -x "$SERVER_SUPERVISOR" ]] || die "Server supervisor missing or not executable."
 [[ -x "$TUNNEL_CLIENT" && -x "$TUNNEL_SUPERVISOR" ]] || die "Tunnel-client installation missing. Run scripts/setup-ubuntu.sh first."
@@ -69,8 +128,9 @@ command -v curl >/dev/null 2>&1 || die "curl is missing."
 command -v setsid >/dev/null 2>&1 || die "setsid is missing."
 command -v sudo >/dev/null 2>&1 || die "sudo is required."
 [[ "$PORT" =~ ^[0-9]+$ ]] && ((PORT >= 1 && PORT <= 65535)) || die "Invalid MCP port."
-[[ "$HEALTH_PORT" =~ ^[0-9]+$ ]] && ((HEALTH_PORT >= 1 && HEALTH_PORT <= 65535)) || die "Invalid health port."
-[[ "$PORT" != "$HEALTH_PORT" ]] || die "MCP and health ports must differ."
+[[ "$HEALTH_PORT" =~ ^[0-9]+$ ]] && ((HEALTH_PORT >= 1 && HEALTH_PORT <= 65535)) || die "Invalid tunnel health port."
+[[ "$PORT" != "$HEALTH_PORT" ]] || die "MCP and tunnel health ports must differ."
+
 ACCOUNT_ENTRY="$(getent passwd "$TUNNEL_USER")" || die "Tunnel service account missing; rerun setup."
 IFS=: read -r _ _ ACCOUNT_UID _ _ ACCOUNT_HOME ACCOUNT_SHELL <<< "$ACCOUNT_ENTRY"
 [[ "$ACCOUNT_HOME" == "$TUNNEL_HOME" && "$ACCOUNT_SHELL" == "/usr/sbin/nologin" ]] || die "Tunnel service account is misconfigured; rerun setup."
@@ -78,14 +138,16 @@ IFS=: read -r _ _ ACCOUNT_UID _ _ ACCOUNT_HOME ACCOUNT_SHELL <<< "$ACCOUNT_ENTRY
 for path in "$SYSTEM_BASE" "$(dirname "$TUNNEL_CLIENT")"; do
   [[ "$(stat -c '%U:%G:%a' "$path")" == "root:root:755" ]] || die "$path must be root:root mode 755; rerun setup."
 done
+
 sudo -v
 sudo -n -u "$TUNNEL_USER" -- /usr/bin/test -x "$TUNNEL_CLIENT" || die "Tunnel account cannot execute tunnel-client."
 sudo -n -u "$TUNNEL_USER" -- "$TUNNEL_CLIENT" --version >/dev/null || die "Tunnel client failed version check."
 if sudo -n /usr/bin/pgrep -u "$TUNNEL_USER" >/dev/null 2>&1; then
-  die "A process is already running as $TUNNEL_USER; inspect it before starting another tunnel."
+  die "A tunnel process is already running as $TUNNEL_USER. Inspect it before starting another tunnel."
 fi
-if port_is_open "$PORT"; then die "MCP port $PORT is already in use."; fi
+if port_is_open "$PORT"; then die "MCP port $PORT is already in use. Stop the existing server first."; fi
 if port_is_open "$HEALTH_PORT"; then die "Tunnel health port $HEALTH_PORT is already in use."; fi
+
 mkdir -p "$WORKSPACE"
 chmod 700 "$WORKSPACE"
 read -r -p "Existing Tunnel ID: " CONTROL_PLANE_TUNNEL_ID
@@ -94,38 +156,49 @@ echo
 [[ -n "$CONTROL_PLANE_TUNNEL_ID" ]] || die "Tunnel ID is required."
 [[ -n "$CONTROL_PLANE_API_KEY" ]] || die "Runtime API key is required."
 
-log "Starting supervised MCP server as $USER"
-env -i HOME="$HOME" USER="${USER:-$(id -un)}" PATH="$PATH" LANG="${LANG:-C.UTF-8}" \
-  REMOTE_CODING_AGENT_AUTH_MODE=none REMOTE_CODING_AGENT_TEST_MODE=false \
-  REMOTE_CODING_AGENT_HOST=127.0.0.1 REMOTE_CODING_AGENT_PORT="$PORT" \
+status STARTING "preparing MCP server"
+: > "$SERVER_SUPERVISOR_LOG"
+: > "$SERVER_CHILD_LOG"
+chmod 600 "$SERVER_SUPERVISOR_LOG" "$SERVER_CHILD_LOG"
+
+# Keep a seven-day idle MCP session window and bounded resource usage.
+env -i \
+  HOME="$HOME" USER="${USER:-$(id -un)}" PATH="$PATH" LANG="${LANG:-C.UTF-8}" \
+  REMOTE_CODING_AGENT_AUTH_MODE=none \
+  REMOTE_CODING_AGENT_TEST_MODE=false \
+  REMOTE_CODING_AGENT_HOST=127.0.0.1 \
+  REMOTE_CODING_AGENT_PORT="$PORT" \
   REMOTE_CODING_AGENT_WORKSPACE="$WORKSPACE" \
   REMOTE_CODING_AGENT_DEFAULT_TIMEOUT_SECONDS="${REMOTE_CODING_AGENT_DEFAULT_TIMEOUT_SECONDS:-120}" \
   REMOTE_CODING_AGENT_MAX_TIMEOUT_SECONDS="${REMOTE_CODING_AGENT_MAX_TIMEOUT_SECONDS:-3600}" \
   REMOTE_CODING_AGENT_COMMAND_QUEUE_TIMEOUT_SECONDS="${REMOTE_CODING_AGENT_COMMAND_QUEUE_TIMEOUT_SECONDS:-30}" \
-  REMOTE_CODING_AGENT_SESSION_IDLE_TIMEOUT_SECONDS="${REMOTE_CODING_AGENT_SESSION_IDLE_TIMEOUT_SECONDS:-86400}" \
+  REMOTE_CODING_AGENT_SESSION_IDLE_TIMEOUT_SECONDS="${REMOTE_CODING_AGENT_SESSION_IDLE_TIMEOUT_SECONDS:-604800}" \
   REMOTE_CODING_AGENT_MAX_SESSIONS="${REMOTE_CODING_AGENT_MAX_SESSIONS:-256}" \
   REMOTE_CODING_AGENT_MAX_QUEUED_COMMANDS="${REMOTE_CODING_AGENT_MAX_QUEUED_COMMANDS:-64}" \
   REMOTE_CODING_AGENT_MAX_CONCURRENT_COMMANDS="${REMOTE_CODING_AGENT_MAX_CONCURRENT_COMMANDS:-4}" \
-  REMOTE_CODING_AGENT_LOG_FILE="$SERVER_LOG" \
-  REMOTE_CODING_AGENT_SUPERVISOR_HEALTH_URL="http://127.0.0.1:${PORT}/" \
-  setsid "$SERVER_SUPERVISOR" "$SERVER_SUPERVISOR_LOG" "$SERVER" </dev/null >/dev/null 2>&1 &
+  REMOTE_CODING_AGENT_CHILD_LOG_FILE="$SERVER_CHILD_LOG" \
+  REMOTE_CODING_AGENT_SUPERVISOR_HEALTH_URL="http://127.0.0.1:${PORT}/readyz" \
+  setsid "$SERVER_SUPERVISOR" "$SERVER_SUPERVISOR_LOG" "$SERVER" &
 SERVER_PID=$!
+
 server_ready=0
 for _ in {1..120}; do
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-    tail -60 "$SERVER_SUPERVISOR_LOG" >&2 || true
-    die "MCP server supervisor exited."
+    tail -30 "$SERVER_CHILD_LOG" >&2 || true
+    die "MCP server supervisor exited during startup."
   fi
-  if port_is_open "$PORT"; then server_ready=1; break; fi
+  if curl -fsS --max-time 2 "$MCP_READY_URL" >/dev/null 2>&1; then
+    server_ready=1
+    break
+  fi
   sleep 0.25
 done
 [[ "$server_ready" == "1" ]] || {
-  tail -60 "$SERVER_LOG" >&2 || true
-  tail -60 "$SERVER_SUPERVISOR_LOG" >&2 || true
-  die "MCP server did not open port $PORT."
+  tail -30 "$SERVER_CHILD_LOG" >&2 || true
+  die "MCP server did not become ready within 30 seconds."
 }
 
-log "Checking MCP initialize, tool discovery, and command execution"
+info "MCP server readiness endpoint passed; checking the MCP protocol and run_command tool"
 MCP_SERVER_URL="$MCP_SERVER_URL" "$PYTHON" - <<'PY'
 import asyncio
 import json
@@ -142,7 +215,7 @@ async def main() -> None:
                 raise SystemExit("run_command is not registered")
             result = await session.call_tool(
                 "run_command",
-                {"command": 'test -z "${CONTROL_PLANE_API_KEY:-}" && printf local-mcp-ok'},
+                {"command": 'test -z "${CONTROL_PLANE_API_KEY:-}" && printf mcp-ok'},
             )
             if result.isError:
                 raise SystemExit("run_command returned an MCP error")
@@ -158,34 +231,41 @@ async def main() -> None:
                         break
             if not isinstance(structured, dict):
                 raise SystemExit("run_command returned no structured command result")
-            if structured.get("stdout") != "local-mcp-ok" or structured.get("exit_code") != 0:
+            if structured.get("stdout") != "mcp-ok" or structured.get("exit_code") != 0:
                 raise SystemExit(f"MCP smoke test failed: {structured!r}")
 
 asyncio.run(main())
-print("MCP handshake and command smoke test passed.")
 PY
+info "MCP protocol smoke test passed"
 
 run_tunnel_client_as_service_user() {
   printf '%s\n' "$CONTROL_PLANE_API_KEY" | sudo -n -u "$TUNNEL_USER" -- /usr/bin/env -i \
-    HOME="$TUNNEL_HOME" PATH="$TUNNEL_PATH" LANG="${LANG:-C.UTF-8}" \
-    CONTROL_PLANE_TUNNEL_ID="$CONTROL_PLANE_TUNNEL_ID" MCP_SERVER_URL="$MCP_SERVER_URL" \
+    HOME="$TUNNEL_HOME" \
+    PATH="$TUNNEL_PATH" \
+    LANG="${LANG:-C.UTF-8}" \
+    CONTROL_PLANE_TUNNEL_ID="$CONTROL_PLANE_TUNNEL_ID" \
+    MCP_SERVER_URL="$MCP_SERVER_URL" \
     HEALTH_LISTEN_ADDR="127.0.0.1:$HEALTH_PORT" \
+    REMOTE_CODING_AGENT_TUNNEL_CLIENT_LOG="$TUNNEL_CLIENT_LOG" \
+    REMOTE_CODING_AGENT_TUNNEL_HEALTH_INTERVAL_SECONDS=10 \
+    REMOTE_CODING_AGENT_TUNNEL_STARTUP_GRACE_SECONDS=180 \
     "$TUNNEL_SUPERVISOR" "$TUNNEL_CLIENT" "$MCP_SERVER_URL" \
     "$TUNNEL_SUPERVISOR_LOG" "24h" "$HEALTH_URL"
 }
-log "Starting supervised OpenAI Secure MCP Tunnel as $TUNNEL_USER"
-printf 'Tunnel ID: %s\nMCP endpoint: %s\nWorkspace: %s\n' "$CONTROL_PLANE_TUNNEL_ID" "$MCP_SERVER_URL" "$WORKSPACE"
-printf 'Tunnel connection TTL: 24h; unhealthy/exited clients are restarted.\n'
-printf 'Use tmux: tmux new -s remote-agent ./scripts/up.sh\n'
-run_tunnel_client_as_service_user >"$TUNNEL_CLIENT_LOG" 2>&1 &
+
+status STARTING "connecting Secure MCP Tunnel (maximum MCP connection TTL: 24h)"
+sudo install -o "$TUNNEL_USER" -g "$TUNNEL_USER" -m 600 /dev/null "$TUNNEL_CLIENT_LOG"
+sudo install -o "$TUNNEL_USER" -g "$TUNNEL_USER" -m 600 /dev/null "$TUNNEL_SUPERVISOR_LOG"
+run_tunnel_client_as_service_user &
 TUNNEL_PID=$!
 CONTROL_PLANE_API_KEY=''
 unset CONTROL_PLANE_API_KEY
+
 health_listener_ready=0
 for _ in {1..120}; do
   if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
-    tail -60 "$TUNNEL_CLIENT_LOG" >&2 || true
-    tail -60 "$TUNNEL_SUPERVISOR_LOG" >&2 || true
+    info "See tunnel diagnostics with: sudo tail -40 $TUNNEL_CLIENT_LOG"
+    info "Supervisor status log: $TUNNEL_SUPERVISOR_LOG"
     die "Tunnel supervisor exited before health listener startup."
   fi
   if curl -fsS --max-time 2 "$HEALTH_URL/healthz" >/dev/null 2>&1; then
@@ -194,28 +274,44 @@ for _ in {1..120}; do
   fi
   sleep 0.5
 done
-[[ "$health_listener_ready" == "1" ]] || die "Tunnel health listener did not start."
+[[ "$health_listener_ready" == "1" ]] || die "Tunnel health listener did not start within 60 seconds."
+info "Tunnel health endpoint is responding; waiting for control-plane registration"
 sudo -K
-log "Waiting for tunnel readiness and successful control-plane polling"
+
+startup_timeout="${REMOTE_CODING_AGENT_STARTUP_TIMEOUT_SECONDS:-300}"
+[[ "$startup_timeout" =~ ^[0-9]+$ ]] && ((startup_timeout >= 30 && startup_timeout <= 900)) || die "REMOTE_CODING_AGENT_STARTUP_TIMEOUT_SECONDS must be between 30 and 900."
 tunnel_ready=0
-for _ in {1..600}; do
+last_wait_notice=0
+for ((elapsed=0; elapsed<startup_timeout; elapsed++)); do
   if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
-    tail -60 "$TUNNEL_CLIENT_LOG" >&2 || true
-    tail -60 "$TUNNEL_SUPERVISOR_LOG" >&2 || true
+    info "See tunnel diagnostics with: sudo tail -40 $TUNNEL_CLIENT_LOG"
+    info "Supervisor status log: $TUNNEL_SUPERVISOR_LOG"
     die "Tunnel supervisor exited before reporting readiness."
   fi
   if curl -fsS --max-time 2 "$HEALTH_URL/readyz" >/dev/null 2>&1 \
     && curl -fsS --max-time 2 "$HEALTH_URL/health/control-plane" 2>/dev/null \
       | "$PYTHON" -c 'import json,sys; p=json.load(sys.stdin); d=p.get("details") or {}; sys.exit(0 if p.get("status") == "ok" and d.get("last_success") and d.get("consecutive_failures", 0) == 0 else 1)' 2>/dev/null
-  then tunnel_ready=1; break; fi
+  then
+    tunnel_ready=1
+    break
+  fi
+  if ((elapsed - last_wait_notice >= 15)); then
+    info "Still waiting for OpenAI control-plane registration (${elapsed}s elapsed)"
+    last_wait_notice=$elapsed
+  fi
   sleep 1
 done
 [[ "$tunnel_ready" == "1" ]] || {
-  tail -60 "$TUNNEL_CLIENT_LOG" >&2 || true
-  tail -60 "$TUNNEL_SUPERVISOR_LOG" >&2 || true
-  die "Tunnel not ready. Check tunnel ID, runtime key permissions, and workspace association."
+  info "See tunnel diagnostics with: sudo tail -40 $TUNNEL_CLIENT_LOG"
+  info "Supervisor status log: $TUNNEL_SUPERVISOR_LOG"
+  die "Tunnel did not become ready within ${startup_timeout}s. Check tunnel ID, key permissions, and workspace association."
 }
-printf '\nSecure MCP Tunnel is ready. Supervised runtime with 24-hour connection TTL.\n'
+
+status RUNNING "MCP server and Secure MCP Tunnel are healthy"
+printf 'Console stays attached. Detach tmux with Ctrl+B, then D.\n'
+printf 'Reconnect with: tmux attach -t remote-agent\n'
+printf 'Server logs: %s | %s\n' "$SERVER_CHILD_LOG" "$SERVER_SUPERVISOR_LOG"
+printf 'Tunnel logs (sudo required): %s | %s\n' "$TUNNEL_CLIENT_LOG" "$TUNNEL_SUPERVISOR_LOG"
+
 if wait "$TUNNEL_PID"; then tunnel_status=0; else tunnel_status=$?; fi
-TUNNEL_PID=""
-exit "$tunnel_status"
+die "Tunnel supervisor exited unexpectedly (code=$tunnel_status)."
