@@ -1,10 +1,14 @@
 """Run the Remote Coding Agent MCP server."""
+
 from __future__ import annotations
 
 import asyncio
 import ctypes
 import logging
+import re
 import sys
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +22,91 @@ from remote_coding_agent.config import Settings
 from remote_coding_agent.executor import CommandExecutionError, execute_command
 
 logger = logging.getLogger("remote_coding_agent")
-_TEST_MODE_COMMANDS = frozenset({
-    "pwd", "ls -la", "python --version", "printf 'mcp-test-ok'",
-})
+_REDACTION_PATTERNS = (
+    re.compile(
+        r"(?i)([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL|AUTHORIZATION)[A-Z0-9_]*\s*=\s*)(?:\"[^\"]*\"|'[^']*'|[^\s;&|]+)"
+    ),
+    re.compile(
+        r"(?i)(--?(?:token|secret|password|passwd|api[-_]?key|access[-_]?key|private[-_]?key|credential|authorization)(?:=|\s+))(?:\"[^\"]*\"|'[^']*'|[^\s;&|]+)"
+    ),
+    re.compile(r"(?i)(Bearer\s+)[A-Za-z0-9._~+/=-]+"),
+    re.compile(r"(?i)([?&](?:access_token|api_key|token|secret|password)=)[^&\s]+"),
+)
+
+
+def _command_preview(command: str, limit: int = 240) -> str:
+    """Return a short command preview with common credential forms redacted."""
+    preview = command
+    for pattern in _REDACTION_PATTERNS:
+        preview = pattern.sub(r"\1[REDACTED]", preview)
+    preview = " ".join(preview.split())
+    return preview if len(preview) <= limit else preview[: limit - 3] + "..."
+
+
+class MCPAccessLogMiddleware:
+    """Log MCP HTTP access without recording headers, bodies, or session IDs."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http" or scope.get("path") != "/mcp":
+            await self.app(scope, receive, send)
+            return
+
+        access_id = uuid.uuid4().hex[:8]
+        method = str(scope.get("method", "UNKNOWN"))
+        started = time.monotonic()
+        status_code = 500
+        completed = False
+        logger.info("ACCESS START id=%s method=%s path=/mcp", access_id, method)
+
+        async def logged_send(message: dict[str, Any]) -> None:
+            nonlocal status_code, completed
+            if message.get("type") == "http.response.start":
+                status_code = int(message.get("status", 500))
+            await send(message)
+            if (
+                message.get("type") == "http.response.body"
+                and not message.get("more_body", False)
+                and not completed
+            ):
+                completed = True
+                logger.info(
+                    "ACCESS END id=%s method=%s path=/mcp status=%s duration_ms=%.1f",
+                    access_id,
+                    method,
+                    status_code,
+                    (time.monotonic() - started) * 1000,
+                )
+
+        try:
+            await self.app(scope, receive, logged_send)
+        except asyncio.CancelledError:
+            logger.info("ACCESS CANCELLED id=%s method=%s path=/mcp", access_id, method)
+            raise
+        except BaseException:
+            logger.exception("ACCESS FAILED id=%s method=%s path=/mcp", access_id, method)
+            raise
+        finally:
+            if not completed:
+                logger.info(
+                    "ACCESS INCOMPLETE id=%s method=%s path=/mcp status=%s duration_ms=%.1f",
+                    access_id,
+                    method,
+                    status_code,
+                    (time.monotonic() - started) * 1000,
+                )
+
+
+_TEST_MODE_COMMANDS = frozenset(
+    {
+        "pwd",
+        "ls -la",
+        "python --version",
+        "printf 'mcp-test-ok'",
+    }
+)
 
 
 def _disable_linux_process_inspection() -> None:
@@ -48,8 +134,12 @@ def _configure_logging() -> None:
 
 def _busy_result(message: str) -> dict[str, Any]:
     return {
-        "stdout": "", "stderr": message, "exit_code": 75,
-        "timed_out": False, "output_truncated": False, "duration_seconds": 0.0,
+        "stdout": "",
+        "stderr": message,
+        "exit_code": 75,
+        "timed_out": False,
+        "output_truncated": False,
+        "duration_seconds": 0.0,
     }
 
 
@@ -97,36 +187,80 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
             timeout_seconds: Optional timeout, capped by the server configuration.
         """
         nonlocal queued_commands
+        invocation_id = uuid.uuid4().hex[:8]
+        started = time.monotonic()
         timeout = settings.default_timeout_seconds if timeout_seconds is None else timeout_seconds
+        preview = (
+            _command_preview(command)
+            if isinstance(command, str)
+            else f"<invalid:{type(command).__name__}>"
+        )
+        requested_cwd = (
+            _command_preview(working_directory, 120)
+            if isinstance(working_directory, str)
+            else "<workspace-root>"
+        )
+        logger.info(
+            "TOOL START id=%s name=run_command command=%s cwd=%s timeout_seconds=%s",
+            invocation_id,
+            preview,
+            requested_cwd,
+            timeout,
+        )
+
+        def report(result: dict[str, Any]) -> dict[str, Any]:
+            logger.info(
+                "TOOL END id=%s name=run_command exit_code=%s timed_out=%s "
+                "duration_seconds=%.3f output_truncated=%s",
+                invocation_id,
+                result.get("exit_code"),
+                result.get("timed_out"),
+                time.monotonic() - started,
+                result.get("output_truncated"),
+            )
+            return result
+
         if not isinstance(command, str) or len(command) > settings.max_command_chars:
-            return {
-                "stdout": "",
-                "stderr": (
-                    "command must be a string no longer than "
-                    f"{settings.max_command_chars} characters"
-                ),
-                "exit_code": 2, "timed_out": False, "output_truncated": False,
-                "duration_seconds": 0.0,
-            }
+            return report(
+                {
+                    "stdout": "",
+                    "stderr": (
+                        "command must be a string no longer than "
+                        f"{settings.max_command_chars} characters"
+                    ),
+                    "exit_code": 2,
+                    "timed_out": False,
+                    "output_truncated": False,
+                    "duration_seconds": 0.0,
+                }
+            )
         if settings.test_mode and command.strip() not in _TEST_MODE_COMMANDS:
-            return {
-                "stdout": "",
-                "stderr": "test mode only permits these exact commands: "
+            return report(
+                {
+                    "stdout": "",
+                    "stderr": "test mode only permits these exact commands: "
                     + ", ".join(sorted(_TEST_MODE_COMMANDS)),
-                "exit_code": 126, "timed_out": False, "output_truncated": False,
-                "duration_seconds": 0.0,
-            }
+                    "exit_code": 126,
+                    "timed_out": False,
+                    "output_truncated": False,
+                    "duration_seconds": 0.0,
+                }
+            )
 
         queued = False
-        async with queue_lock:
-            if execution_slots.locked():
-                if queued_commands >= settings.max_queued_commands:
-                    logger.warning("Command rejected because the execution queue is full")
-                    return _busy_result("server is busy; command queue is full, retry later")
-                queued_commands += 1
-                queued = True
         acquired = False
         try:
+            async with queue_lock:
+                if execution_slots.locked():
+                    if queued_commands >= settings.max_queued_commands:
+                        logger.warning(
+                            "TOOL REJECTED id=%s reason=command_queue_full", invocation_id
+                        )
+                        return report(
+                            _busy_result("server is busy; command queue is full, retry later")
+                        )
+                    queued_commands += 1
+                    queued = True
             if queued:
                 try:
                     await asyncio.wait_for(
@@ -134,13 +268,15 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
                         timeout=settings.command_queue_timeout_seconds,
                     )
                 except TimeoutError:
-                    return _busy_result(
-                        "server is busy; command waited too long for an execution slot"
+                    return report(
+                        _busy_result(
+                            "server is busy; command waited too long for an execution slot"
+                        )
                     )
             else:
                 await execution_slots.acquire()
             acquired = True
-            return await execute_command(
+            result = await execute_command(
                 command=command,
                 workspace=Path(settings.workspace),
                 working_directory=working_directory,
@@ -149,18 +285,31 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
                 max_output_chars=settings.max_output_chars,
                 max_command_chars=settings.max_command_chars,
             )
+            return report(result)
         except CommandExecutionError as exc:
-            return {
-                "stdout": "", "stderr": str(exc), "exit_code": 2,
-                "timed_out": False, "output_truncated": False, "duration_seconds": 0.0,
-            }
+            logger.info("TOOL REJECTED id=%s reason=%s", invocation_id, type(exc).__name__)
+            return report(
+                {
+                    "stdout": "",
+                    "stderr": str(exc),
+                    "exit_code": 2,
+                    "timed_out": False,
+                    "output_truncated": False,
+                    "duration_seconds": 0.0,
+                }
+            )
         except OSError as exc:
-            logger.warning("Command execution failed (%s)", type(exc).__name__)
-            return {
-                "stdout": "", "stderr": f"command execution failed: {type(exc).__name__}",
-                "exit_code": 126, "timed_out": False, "output_truncated": False,
-                "duration_seconds": 0.0,
-            }
+            logger.warning("TOOL FAILED id=%s error=%s", invocation_id, type(exc).__name__)
+            return report(
+                {
+                    "stdout": "",
+                    "stderr": f"command execution failed: {type(exc).__name__}",
+                    "exit_code": 126,
+                    "timed_out": False,
+                    "output_truncated": False,
+                    "duration_seconds": 0.0,
+                }
+            )
         finally:
             if queued:
                 async with queue_lock:
@@ -172,7 +321,7 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
     app = BearerTokenMiddleware(
         mcp.streamable_http_app(), expected_token, settings.max_request_bytes
     )
-    return mcp, app
+    return mcp, MCPAccessLogMiddleware(app)
 
 
 def main() -> None:
@@ -182,8 +331,13 @@ def main() -> None:
     _disable_linux_process_inspection()
     _, app = create_server(settings)
     uvicorn.run(
-        app, host=settings.host, port=settings.port, log_config=None,
-        access_log=False, timeout_keep_alive=30, timeout_graceful_shutdown=30,
+        app,
+        host=settings.host,
+        port=settings.port,
+        log_config=None,
+        access_log=False,
+        timeout_keep_alive=30,
+        timeout_graceful_shutdown=30,
     )
 
 

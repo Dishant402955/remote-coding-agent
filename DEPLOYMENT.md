@@ -139,7 +139,21 @@ Expected responses are `live` and `ready`. The control-plane JSON should contain
 
 The MCP readiness endpoints are `http://127.0.0.1:8000/healthz` and `/readyz`. The tunnel-client health listener is `http://127.0.0.1:18080/healthz`, `/readyz`, and `/health/control-plane`.
 
-The main logs are `/tmp/remote-coding-agent-server-child.log` and `/tmp/remote-coding-agent-server-supervisor.log`. Tunnel logs are `/tmp/remote-coding-agent-tunnel-client.log` and `/tmp/remote-coding-agent-tunnel-supervisor.log`; they are owned by the isolated tunnel service account, so inspect them with `sudo tail -40 <path>`.
+The main logs are `/tmp/remote-coding-agent-server-child.log` and `/tmp/remote-coding-agent-server-supervisor.log`. The child log includes MCP HTTP access records (`ACCESS START` / `ACCESS END`) and command audit records (`TOOL START` / `TOOL END`). Command records contain a shortened preview, working directory, timeout, exit code, and duration. Common credential forms are redacted; request bodies, authorization headers, MCP session IDs, and command stdout/stderr are never copied into these audit records. Server child output is mirrored into the attached tmux terminal as well as the child log.
+
+Follow the live MCP and command audit log from another terminal with:
+
+```bash
+tail -f /tmp/remote-coding-agent-server-child.log
+```
+
+Follow supervisor lifecycle transitions with:
+
+```bash
+tail -f /tmp/remote-coding-agent-server-supervisor.log
+```
+
+Tunnel logs are `/tmp/remote-coding-agent-tunnel-client.log` and `/tmp/remote-coding-agent-tunnel-supervisor.log`; they are owned by the isolated tunnel service account, so inspect them with `sudo tail -40 <path>`.
 
 ## 7. Troubleshooting
 

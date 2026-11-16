@@ -87,7 +87,8 @@ while true; do
   health_failures=0
   transition STARTING "launching process"
   rotate_child_log
-  setsid "$@" >> "$CHILD_LOG" 2>&1 &
+  # Tee child output to both the attached terminal and its private log.
+  setsid "$@" > >(tee -a "$CHILD_LOG") 2>&1 &
   CHILD_PID=$!
 
   if [[ -z "$HEALTH_URL" ]]; then

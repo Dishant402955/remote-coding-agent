@@ -157,7 +157,6 @@ def test_mcp_http_initializes_and_runs_command_with_valid_token(tmp_path) -> Non
     assert structured["timed_out"] is False
 
 
-
 def test_unauthenticated_test_mode_allows_only_smoke_commands(tmp_path) -> None:
     _, app = create_server(
         Settings(
@@ -244,7 +243,6 @@ def test_unauthenticated_test_mode_allows_only_smoke_commands(tmp_path) -> None:
         assert not blocked_file.exists()
 
 
-
 def test_long_lived_session_capacity_is_applied_to_fastmcp(tmp_path) -> None:
     mcp, _ = create_server(
         Settings(
@@ -259,9 +257,7 @@ def test_long_lived_session_capacity_is_applied_to_fastmcp(tmp_path) -> None:
     assert mcp.settings.max_request_body_size == 1_048_576
 
 
-def test_command_queue_is_bounded_and_serves_waiting_work(
-    tmp_path, monkeypatch
-) -> None:
+def test_command_queue_is_bounded_and_serves_waiting_work(tmp_path, monkeypatch) -> None:
     async def fake_execute_command(**kwargs):
         await asyncio.sleep(0.15)
         return {
@@ -305,9 +301,7 @@ def test_command_queue_is_bounded_and_serves_waiting_work(
     assert "queue is full" in rejected["stderr"]
 
 
-def test_command_queue_wait_timeout_returns_busy_result(
-    tmp_path, monkeypatch
-) -> None:
+def test_command_queue_wait_timeout_returns_busy_result(tmp_path, monkeypatch) -> None:
     async def slow_execute_command(**kwargs):
         await asyncio.sleep(1.2)
         return {
@@ -361,3 +355,51 @@ def test_health_and_readiness_endpoints_are_explicit_and_public(tmp_path) -> Non
     assert ready.status_code == 200
     assert ready.json() == {"status": "ready", "service": "remote-coding-agent"}
     assert missing.status_code == 404
+
+
+def test_mcp_access_and_command_audit_logs_are_visible_and_redacted(
+    tmp_path, caplog, monkeypatch
+) -> None:
+    import logging
+
+    caplog.set_level(logging.INFO, logger="remote_coding_agent")
+    mcp, app = create_server(
+        Settings(
+            auth_mode="none", workspace=tmp_path, default_timeout_seconds=5, max_timeout_seconds=10
+        )
+    )
+    with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+        initialized = _initialize(client)
+        assert initialized.status_code == 200, initialized.text
+
+    async def fake_execute_command(**kwargs):
+        return {
+            "stdout": "runtime-output-marker",
+            "stderr": "",
+            "exit_code": 0,
+            "timed_out": False,
+            "output_truncated": False,
+            "duration_seconds": 0.001,
+        }
+
+    import remote_coding_agent.server as server_module
+
+    monkeypatch.setattr(server_module, "execute_command", fake_execute_command)
+    result = asyncio.run(
+        mcp._tool_manager.call_tool(
+            "run_command",
+            {"command": "API_KEY=sentinel-value printf done"},
+            convert_result=False,
+        )
+    )
+    assert result["stdout"] == "runtime-output-marker"
+    log_text = caplog.text
+    assert "ACCESS START" in log_text
+    assert "ACCESS END" in log_text
+    assert "TOOL START" in log_text
+    assert "TOOL END" in log_text
+    assert "API_KEY=[REDACTED]" in log_text
+    assert "sentinel-value" not in log_text
+    assert "runtime-output-marker" not in log_text
+    assert "MCP-Session-Id" not in log_text
+    assert "Authorization" not in log_text
