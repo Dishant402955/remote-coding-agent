@@ -32,6 +32,8 @@ HISTORY_FILE = STATE_DIR / "command-history.jsonl"
 START_FILE = STATE_DIR / "start-requested"
 TUNNEL_USER = "remote-coding-agent-tunnel"
 TUNNEL_CREDENTIALS = "/var/lib/remote-coding-agent-tunnel/credentials.json"
+STORE_HELPER = "/usr/local/lib/remote-coding-agent/store-tunnel-credentials.sh"
+SESSION_FILE = STATE_DIR / "agent-session.json"
 HOST = "127.0.0.1"
 PORT = int(os.getenv("REMOTE_CODING_AGENT_DASHBOARD_PORT", "3333"))
 MCP_PORT = int(os.getenv("REMOTE_CODING_AGENT_PORT", "8000"))
@@ -61,11 +63,12 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 function authPage(setup){app.innerHTML='<div class="authwrap"><div class="auth"><div class="brand"><div class="logo">R</div><div><h1>Remote Agent</h1><small>Local control center</small></div></div><h2 style="margin-top:26px">'+(setup?'Set up your dashboard':'Welcome back')+'</h2><p>'+(setup?'Create a dashboard password and add your existing Secure MCP Tunnel credentials.':'Sign in to manage your agent and view command history.')+'</p><form id="authform">'+(setup?'<label class="field"><span>Dashboard password</span><input name="password" type="password" minlength="12" autocomplete="new-password" required><div class="hint">Use at least 12 characters. This protects the local dashboard.</div></label><label class="field"><span>Confirm password</span><input name="confirm" type="password" minlength="12" required></label>':'<label class="field"><span>Dashboard password</span><input name="password" type="password" autocomplete="current-password" required></label>')+(setup?'<label class="field"><span>Existing Tunnel ID</span><input name="tunnel_id" autocomplete="off" required></label><label class="field"><span>Runtime API key</span><input name="api_key" type="password" autocomplete="off" required><div class="hint">Stored under the isolated tunnel service account. Never committed or placed in your home directory.</div></label>':'')+'<button class="btn wide" type="submit">'+(setup?'Save securely and continue':'Unlock dashboard')+'</button><div class="error" id="error"></div></form></div></div>';
 document.getElementById('authform').onsubmit=async e=>{e.preventDefault();let f=new FormData(e.target),body={password:f.get('password')};if(setup){if(body.password!==f.get('confirm')){document.getElementById('error').textContent='Passwords do not match';return}body.tunnel_id=f.get('tunnel_id');body.api_key=f.get('api_key')}try{await api(setup?'/api/setup':'/api/login',{method:'POST',body:JSON.stringify(body)});await boot()}catch(x){document.getElementById('error').textContent=x.message}}
 }
-let startRequested=false;function dashboard(){app.innerHTML='<div class="shell"><header class="top"><div class="brand"><div class="logo">R</div><div><h1>Remote Agent</h1><small>Local control center</small></div></div><div class="topright"><span class="pill" id="clock">--:--</span><button class="btn secondary" id="settings">Settings</button><button class="btn" id="start">Start agent</button><button class="btn secondary" id="logout">Lock</button></div></header><h2>Agent overview</h2><p class="sub">Live runtime health and a searchable history of commands executed through MCP.</p><div class="grid"><div class="card"><div class="metric-label">MCP server</div><div class="metric" id="mcp">Checking</div><div class="metric-note" id="mcpnote">127.0.0.1</div></div><div class="card"><div class="metric-label">Secure tunnel</div><div class="metric" id="tunnel">Checking</div><div class="metric-note" id="tunnelnote">Control-plane health</div></div><div class="card"><div class="metric-label">Commands recorded</div><div class="metric" id="count">0</div><div class="metric-note" id="last">No command activity yet</div></div></div><section class="section"><div class="sectionhead"><h3>Command history</h3><div class="tools"><input id="search" class="search" placeholder="Filter commands…"><button id="refresh" class="btn secondary">Refresh</button></div></div><div class="card history" id="history"><div class="empty">Loading command history…</div></div></section><div class="foot"><span>Dashboard is bound to localhost only</span><span>Auto-refreshes every 3 seconds</span></div></div>';
+let startRequested=false;function dashboard(){app.innerHTML='<div class="shell"><header class="top"><div class="brand"><div class="logo">R</div><div><h1>Remote Agent</h1><small>Local control center</small></div></div><div class="topright"><span class="pill" id="clock">--:--</span><button class="btn secondary" id="settings">Settings</button><button class="btn" id="start">Start agent</button><button class="btn secondary" id="logout">Lock</button></div></header><h2>Agent overview</h2><p class="sub">Live runtime health and a searchable history of commands executed through MCP.</p><div class="grid"><div class="card"><div class="metric-label">Agent session</div><div class="metric" id="session">Checking</div><div class="metric-note" id="sessionnote">Session uptime</div></div><div class="card"><div class="metric-label">MCP server</div><div class="metric" id="mcp">Checking</div><div class="metric-note" id="mcpnote">127.0.0.1</div></div><div class="card"><div class="metric-label">Secure tunnel</div><div class="metric" id="tunnel">Checking</div><div class="metric-note" id="tunnelnote">Control-plane health</div></div><div class="card"><div class="metric-label">Commands recorded</div><div class="metric" id="count">0</div><div class="metric-note" id="last">No command activity yet</div></div></div><section class="section"><div class="sectionhead"><h3>Command history</h3><div class="tools"><input id="search" class="search" placeholder="Filter commands…"><button id="refresh" class="btn secondary">Refresh</button></div></div><div class="card history" id="history"><div class="empty">Loading command history…</div></div></section><div class="foot"><span>Dashboard is bound to localhost only</span><span>Auto-refreshes every 3 seconds</span></div></div>';
 document.getElementById('logout').onclick=async()=>{await api('/api/logout',{method:'POST',body:'{}'});authPage(false)};
 document.getElementById('settings').onclick=settingsPage;document.getElementById('start').onclick=async()=>{try{await api('/api/start',{method:'POST',body:'{}'});startRequested=true;document.getElementById('start').textContent='Starting…';document.getElementById('start').disabled=true}catch(e){alert(e.message)}};document.getElementById('refresh').onclick=refresh;document.getElementById('search').oninput=renderHistory;refresh();setInterval(refresh,3000);setInterval(()=>document.getElementById('clock').textContent=new Date().toLocaleTimeString(),1000)}
 function renderHistory(){let q=(document.getElementById('search')?.value||'').toLowerCase();let rows=items.filter(x=>(x.command+' '+x.cwd).toLowerCase().includes(q));let el=document.getElementById('history');if(!rows.length){el.innerHTML='<div class="empty">No matching commands yet. Run a command through your MCP agent and it will appear here.</div>';return}el.innerHTML=rows.map(x=>'<div class="historyrow"><div class="time">'+esc(new Date(x.started_at).toLocaleString())+'</div><div><div class="cmd">$ '+esc(x.command)+'</div><div class="cwd">'+esc(x.cwd||'workspace root')+' · '+(x.duration_seconds==null?'running':esc(Number(x.duration_seconds).toFixed(2)+'s'))+'</div></div><div class="state '+(x.status==='success'?'ok':x.status==='running'?'':'fail')+'">'+(x.status==='success'?'EXIT 0':x.status==='running'?'RUNNING':'EXIT '+esc(x.exit_code??'ERR'))+'</div></div>').join('')}
-async function refresh(){try{let d=await api('/api/status');statusData=d;document.getElementById('start').hidden=!!d.mcp||startRequested;document.getElementById('mcp').innerHTML='<span class="dot '+(d.mcp?'ok':'bad')+'"></span>'+(d.mcp?'Online':'Offline');document.getElementById('mcpnote').textContent='127.0.0.1:'+d.mcp_port;document.getElementById('tunnel').innerHTML='<span class="dot '+(d.tunnel?'ok':'bad')+'"></span>'+(d.tunnel?'Connected':'Offline');document.getElementById('tunnelnote').textContent=d.control_plane?'Control plane healthy':'Waiting for tunnel';items=d.history||[];document.getElementById('count').textContent=d.total_commands;document.getElementById('last').textContent=d.last_command?'Last activity '+new Date(d.last_command).toLocaleTimeString():'No command activity yet';renderHistory()}catch(e){if(e.message.includes('Unauthorized'))authPage(false)}}
+function durationLabel(seconds){if(seconds==null)return 'Not running';let h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),v=seconds%60;return h+'h '+m+'m '+v+'s'}
+async function refresh(){try{let d=await api('/api/status');statusData=d;document.getElementById('start').hidden=!!d.mcp||startRequested;document.getElementById('session').innerHTML='<span class="dot '+(d.session?.status==='running'?'ok':'bad')+'"></span>'+(d.session?.status==='running'?'Running':'Stopped');document.getElementById('sessionnote').textContent=d.session?.status==='running'?'Uptime '+durationLabel(d.uptime_seconds):'No active agent session';document.getElementById('mcp').innerHTML='<span class="dot '+(d.mcp?'ok':'bad')+'"></span>'+(d.mcp?'Online':'Offline');document.getElementById('mcpnote').textContent='127.0.0.1:'+d.mcp_port;document.getElementById('tunnel').innerHTML='<span class="dot '+(d.tunnel?'ok':'bad')+'"></span>'+(d.tunnel?'Connected':'Offline');document.getElementById('tunnelnote').textContent=d.control_plane?'Control plane healthy':'Waiting for tunnel';items=d.history||[];document.getElementById('count').textContent=d.total_commands;document.getElementById('last').textContent=d.last_command?'Last activity '+new Date(d.last_command).toLocaleTimeString():'No command activity yet';renderHistory()}catch(e){if(e.message.includes('Unauthorized'))authPage(false)}}
 function settingsPage(){app.innerHTML='<div class="shell"><header class="top"><div class="brand"><div class="logo">R</div><div><h1>Remote Agent</h1><small>Settings</small></div></div><button class="btn secondary" id="back">Back to dashboard</button></header><h2>Dashboard settings</h2><p class="sub">Update your local dashboard password or Secure MCP Tunnel credentials.</p><div class="card" style="max-width:620px"><form id="settingsform"><label class="field"><span>Current dashboard password</span><input name="current_password" type="password" required></label><label class="field"><span>New dashboard password (optional)</span><input name="new_password" type="password" minlength="12" placeholder="Leave blank to keep current"></label><label class="field"><span>Tunnel ID</span><input name="tunnel_id" autocomplete="off" required></label><label class="field"><span>Runtime API key</span><input name="api_key" type="password" placeholder="Leave blank to keep saved key"></label><div class="hint">Tunnel credentials are stored under the isolated tunnel service account, not your normal home directory. Credential changes require the launcher to be waiting for startup. Password-only changes can be made while running.</div><button class="btn wide">Save settings</button><div class="error" id="error"></div></form></div></div>';api('/api/settings').then(d=>{document.querySelector('[name=tunnel_id]').value=d.tunnel_id||''}).catch(()=>{});document.getElementById('back').onclick=dashboard;document.getElementById('settingsform').onsubmit=async e=>{e.preventDefault();let f=new FormData(e.target),b=Object.fromEntries(f.entries());try{await api('/api/settings',{method:'POST',body:JSON.stringify(b)});dashboard()}catch(x){document.getElementById('error').textContent=x.message}}}
 async function boot(){try{let d=await api('/api/auth-state');if(!d.configured){authPage(true);return}if(!d.authenticated){authPage(false);return}dashboard()}catch(e){authPage(false)}}
 boot();
@@ -97,15 +100,11 @@ def _save_config(data: dict[str, Any]) -> None:
 
 
 def _store_tunnel_credentials(tunnel_id: str, api_key: str) -> None:
-    """Write credentials as the isolated tunnel account, never into the agent user's files."""
+    """Delegate credential writes to a root-installed helper running as tunnel user."""
     payload = json.dumps({"tunnel_id": tunnel_id, "api_key": api_key})
-    command = "umask 077; cat > " + TUNNEL_CREDENTIALS
     try:
         result = subprocess.run(
-            [
-                "sudo", "-n", "-u", TUNNEL_USER, "--",
-                "/bin/sh", "-c", command,
-            ],
+            ["sudo", "-n", "-u", TUNNEL_USER, "--", STORE_HELPER],
             input=payload,
             text=True,
             capture_output=True,
@@ -116,7 +115,7 @@ def _store_tunnel_credentials(tunnel_id: str, api_key: str) -> None:
         raise RuntimeError("Could not securely store tunnel credentials") from exc
     if result.returncode != 0:
         raise RuntimeError(
-            "Could not securely store tunnel credentials; authorize sudo and retry"
+            "Could not securely store tunnel credentials; rerun setup-ubuntu.sh"
         )
 
 
@@ -196,10 +195,25 @@ def _status() -> dict[str, Any]:
             control = payload.get("status") == "ok" and bool(details.get("last_success")) and details.get("consecutive_failures", 0) == 0
     except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
         pass
+    try:
+        session = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        session = {"status": "stopped"}
+    started_at = session.get("started_at")
+    uptime_seconds = None
+    if session.get("status") == "running" and started_at:
+        try:
+            uptime_seconds = max(
+                0,
+                int((datetime.now(UTC) - datetime.fromisoformat(started_at)).total_seconds()),
+            )
+        except ValueError:
+            pass
     return {
         "mcp": mcp, "tunnel": tunnel_live and control, "control_plane": control,
         "mcp_port": MCP_PORT, "history": history, "total_commands": len(history),
         "last_command": history[0].get("started_at") if history else None,
+        "session": session, "uptime_seconds": uptime_seconds,
     }
 
 
@@ -358,8 +372,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if tunnel_id != config.get("tunnel_id") or api_key_input:
                 try:
-                    saved = _read_tunnel_credentials()
-                    _store_tunnel_credentials(tunnel_id, api_key_input or saved["api_key"])
+                    _store_tunnel_credentials(tunnel_id, api_key_input)
                 except RuntimeError as exc:
                     self._json(503, {"error": str(exc)})
                     return
