@@ -19,6 +19,7 @@ SERVER="$ROOT/.venv/bin/remote-coding-agent"
 PYTHON="$ROOT/.venv/bin/python"
 SERVER_SUPERVISOR="$ROOT/scripts/server-supervisor.sh"
 TUNNEL_USER="remote-coding-agent-tunnel"
+STOP_TUNNEL_HELPER="/usr/local/lib/remote-coding-agent/stop-tunnel-processes.sh"
 TUNNEL_HOME="/var/lib/$TUNNEL_USER"
 SYSTEM_BASE="/usr/local/lib/remote-coding-agent"
 TUNNEL_CLIENT="$SYSTEM_BASE/tunnel-client/tunnel-client"
@@ -99,28 +100,10 @@ cleanup() {
   cleanup_complete=1
 
   if [[ -n "$TUNNEL_PID" ]]; then
-    if sudo -v; then
-      sudo -n /usr/bin/pkill -TERM -u "$TUNNEL_USER" 2>/dev/null || true
-      tunnel_stopped=0
-      for _ in {1..100}; do
-        if ! sudo -n /usr/bin/pgrep -u "$TUNNEL_USER" >/dev/null 2>&1; then
-          tunnel_stopped=1
-          break
-        fi
-        sleep 0.1
-      done
-      if ((tunnel_stopped == 0)); then
-        info "Tunnel did not stop within 10 seconds; forcing remaining tunnel processes to exit"
-        sudo -n /usr/bin/pkill -KILL -u "$TUNNEL_USER" 2>/dev/null || true
-        sleep 0.2
-        if sudo -n /usr/bin/pgrep -u "$TUNNEL_USER" >/dev/null 2>&1; then
-          cleanup_complete=0
-        fi
-      fi
+    if sudo -n "$STOP_TUNNEL_HELPER"; then
       stop_process "$TUNNEL_PID"
-      sudo -K 2>/dev/null || true
     else
-      printf 'STATUS: WARNING | Could not authenticate to stop tunnel service account %s.\n' "$TUNNEL_USER" >&2
+      printf 'STATUS: WARNING | Could not stop tunnel service account %s with the restricted cleanup helper.\n' "$TUNNEL_USER" >&2
       cleanup_complete=0
     fi
   fi
