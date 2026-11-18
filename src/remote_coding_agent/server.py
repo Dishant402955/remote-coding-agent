@@ -51,7 +51,7 @@ def _record_command(event: dict[str, Any]) -> None:
                 recent = _HISTORY_FILE.read_text(encoding="utf-8").splitlines()[-1000:]
                 temporary = _HISTORY_FILE.with_suffix(".tmp")
                 with temporary.open("w", encoding="utf-8") as handle:
-                    handle.write("\\n".join(recent) + "\\n")
+                    handle.write("\n".join(recent) + "\n")
                     handle.flush()
                     os.fsync(handle.fileno())
                 os.chmod(temporary, 0o600)
