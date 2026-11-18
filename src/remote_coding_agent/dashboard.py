@@ -174,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _session(self) -> bool:
         cookie = self.headers.get("Cookie", "")
-        value = next((part.strip()[8:] for part in cookie.split(";") if part.strip().startswith("ra_session=")), "")
+        value = next((part.strip()[11:] for part in cookie.split(";") if part.strip().startswith("ra_session=")), "")
         if not value:
             return False
         with LOCK:
@@ -258,7 +258,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/logout":
             cookie = self.headers.get("Cookie", "")
-            sid = next((part.strip()[8:] for part in cookie.split(";") if part.strip().startswith("ra_session=")), "")
+            sid = next((part.strip()[11:] for part in cookie.split(";") if part.strip().startswith("ra_session=")), "")
             with LOCK:
                 SESSIONS.pop(sid, None)
             self._json(200, {"ok": True}, {"Set-Cookie": self._clear_cookie()})
