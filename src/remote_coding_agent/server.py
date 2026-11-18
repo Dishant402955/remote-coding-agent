@@ -47,6 +47,15 @@ def _record_command(event: dict[str, Any]) -> None:
             finally:
                 os.close(descriptor)
             os.chmod(_HISTORY_FILE, 0o600)
+            if _HISTORY_FILE.stat().st_size > 1_048_576:
+                recent = _HISTORY_FILE.read_text(encoding="utf-8").splitlines()[-1000:]
+                temporary = _HISTORY_FILE.with_suffix(".tmp")
+                with temporary.open("w", encoding="utf-8") as handle:
+                    handle.write("\\n".join(recent) + "\\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.chmod(temporary, 0o600)
+                os.replace(temporary, _HISTORY_FILE)
     except OSError:
         logger.warning("Could not persist dashboard command history")
 
