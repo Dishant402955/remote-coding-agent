@@ -39,7 +39,7 @@ def _record_command(event: dict[str, Any]) -> None:
     try:
         _STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(_STATE_DIR, 0o700)
-        payload = json.dumps(event, separators=(",", ":")) + "\\n"
+        payload = json.dumps(event, separators=(",", ":")) + "\n"
         with _HISTORY_LOCK:
             descriptor = os.open(_HISTORY_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             try:
