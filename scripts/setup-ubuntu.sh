@@ -199,7 +199,7 @@ sudo install -o root -g root -m 755 "$ROOT/scripts/store-tunnel-credentials.sh" 
 STOP_TUNNEL_HELPER="$SYSTEM_BASE/stop-tunnel-processes.sh"
 sudo install -o root -g root -m 755 "$ROOT/scripts/stop-tunnel-processes.sh" "$STOP_TUNNEL_HELPER"
 
-# Permit only explicit credential reads and writes through the fixed-purpose helper.
+# Permit only fixed-purpose credential and tunnel-cleanup operations.
 SUDOERS_FILE="/etc/sudoers.d/remote-coding-agent-dashboard-$UID"
 SUDOERS_STAGE="/etc/sudoers.d/.remote-coding-agent-dashboard-$UID.new"
 SUDOERS_TEMP="$(mktemp)"
