@@ -31,6 +31,8 @@ DASHBOARD_PORT="$(printenv REMOTE_CODING_AGENT_DASHBOARD_PORT || printf '3333')"
 STATE_DIR="${REMOTE_CODING_AGENT_STATE_DIR:-$HOME/.local/state/remote-coding-agent}"
 DASHBOARD_LOG="/tmp/remote-coding-agent-dashboard.log"
 SESSION_FILE="$STATE_DIR/agent-session.json"
+SESSION_HISTORY_FILE="$STATE_DIR/session-history.jsonl"
+SESSION_ID=""
 STOP_FILE="$STATE_DIR/stop-requested"
 SESSION_STARTED_AT=""
 SERVER_SUPERVISOR_LOG="/tmp/remote-coding-agent-server-supervisor.log"
@@ -60,10 +62,13 @@ write_session_state() {
   [[ -n "$SESSION_STARTED_AT" ]] || return 0
   updated="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   temporary="$SESSION_FILE.tmp"
-  printf '{"status":"%s","started_at":"%s","updated_at":"%s"}\n' \
-    "$next" "$SESSION_STARTED_AT" "$updated" > "$temporary"
+  printf '{"status":"%s","session_id":"%s","started_at":"%s","updated_at":"%s"}\n' \
+    "$next" "$SESSION_ID" "$SESSION_STARTED_AT" "$updated" > "$temporary"
   chmod 600 "$temporary"
   mv -f "$temporary" "$SESSION_FILE"
+  printf '{"session_id":"%s","status":"%s","started_at":"%s","updated_at":"%s"}\n' \
+    "$SESSION_ID" "$next" "$SESSION_STARTED_AT" "$updated" >> "$SESSION_HISTORY_FILE"
+  chmod 600 "$SESSION_HISTORY_FILE"
 }
 die() { printf '%s | STATUS: FAILED | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; exit 1; }
 port_is_open() { local port="$1"; (echo > "/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1; }
@@ -172,6 +177,7 @@ if port_is_open "$DASHBOARD_PORT"; then die "Dashboard port $DASHBOARD_PORT is a
 mkdir -p "$WORKSPACE" "$STATE_DIR"
 chmod 700 "$WORKSPACE" "$STATE_DIR"
 SESSION_STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+SESSION_ID="$(date -u '+%Y%m%dT%H%M%SZ')-$"
 write_session_state "starting"
 : > "$DASHBOARD_LOG"
 chmod 600 "$DASHBOARD_LOG"
@@ -198,8 +204,14 @@ done
 status STARTING "waiting for dashboard authentication and start request"
 printf 'Open the local dashboard: http://127.0.0.1:%s\n' "$DASHBOARD_PORT"
 printf 'Sign in or create your password, configure the tunnel credentials, then click Start agent.\n'
-"$PYTHON" -m remote_coding_agent.dashboard --wait-for-start \
-  --timeout-seconds "${REMOTE_CODING_AGENT_DASHBOARD_SETUP_TIMEOUT_SECONDS:-3600}" || die "Dashboard start request timed out."
+if "$PYTHON" -m remote_coding_agent.dashboard --wait-for-start \
+  --timeout-seconds "${REMOTE_CODING_AGENT_DASHBOARD_SETUP_TIMEOUT_SECONDS:-3600}"; then
+  :
+else
+  wait_status=$?
+  [[ "$wait_status" == "130" ]] && exit 0
+  die "Dashboard start request timed out or failed."
+fi
 CREDENTIALS_OUTPUT="$( "$PYTHON" -m remote_coding_agent.dashboard --read-credentials )" || die "Could not read dashboard credentials."
 mapfile -t CREDENTIALS <<< "$CREDENTIALS_OUTPUT"
 unset CREDENTIALS_OUTPUT
