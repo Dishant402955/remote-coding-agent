@@ -197,7 +197,7 @@ sudo install -o root -g root -m 755 "$ROOT/scripts/tunnel-client-supervisor.sh" 
 STORE_CREDENTIALS_HELPER="$SYSTEM_BASE/store-tunnel-credentials.sh"
 sudo install -o root -g root -m 755 "$ROOT/scripts/store-tunnel-credentials.sh" "$STORE_CREDENTIALS_HELPER"
 
-# Permit only the dedicated tunnel account to receive credential updates.
+# Permit only explicit credential reads and writes through the fixed-purpose helper.
 SUDOERS_FILE="/etc/sudoers.d/remote-coding-agent-dashboard-$UID"
 SUDOERS_STAGE="/etc/sudoers.d/.remote-coding-agent-dashboard-$UID.new"
 SUDOERS_TEMP="$(mktemp)"
