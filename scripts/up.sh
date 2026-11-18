@@ -30,6 +30,8 @@ HEALTH_PORT="$(printenv REMOTE_CODING_AGENT_HEALTH_PORT || printf '18080')"
 DASHBOARD_PORT="$(printenv REMOTE_CODING_AGENT_DASHBOARD_PORT || printf '3333')"
 STATE_DIR="${REMOTE_CODING_AGENT_STATE_DIR:-$HOME/.local/state/remote-coding-agent}"
 DASHBOARD_LOG="/tmp/remote-coding-agent-dashboard.log"
+SESSION_FILE="$STATE_DIR/agent-session.json"
+SESSION_STARTED_AT=""
 SERVER_SUPERVISOR_LOG="/tmp/remote-coding-agent-server-supervisor.log"
 SERVER_CHILD_LOG="/tmp/remote-coding-agent-server-child.log"
 TUNNEL_CLIENT_LOG="/tmp/remote-coding-agent-tunnel-client.log"
@@ -52,6 +54,16 @@ status() {
   STATE="$next"
 }
 info() { printf '%s | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+write_session_state() {
+  local next="$1" updated temporary
+  [[ -n "$SESSION_STARTED_AT" ]] || return 0
+  updated="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  temporary="$SESSION_FILE.tmp.$"
+  printf '{"status":"%s","started_at":"%s","updated_at":"%s","launcher_pid":%s}\\n' \
+    "$next" "$SESSION_STARTED_AT" "$updated" "$" > "$temporary"
+  chmod 600 "$temporary"
+  mv -f "$temporary" "$SESSION_FILE"
+}
 die() { printf '%s | STATUS: FAILED | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; exit 1; }
 port_is_open() { local port="$1"; (echo > "/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1; }
 
@@ -104,6 +116,7 @@ cleanup() {
 
   stop_process "$SERVER_PID"
   stop_process "$DASHBOARD_PID"
+  write_session_state "stopped"
   unset CONTROL_PLANE_API_KEY CONTROL_PLANE_TUNNEL_ID
   sudo -K 2>/dev/null || true
   if ((cleanup_complete)); then
@@ -157,6 +170,8 @@ if port_is_open "$DASHBOARD_PORT"; then die "Dashboard port $DASHBOARD_PORT is a
 
 mkdir -p "$WORKSPACE" "$STATE_DIR"
 chmod 700 "$WORKSPACE" "$STATE_DIR"
+SESSION_STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+write_session_state "starting"
 : > "$DASHBOARD_LOG"
 chmod 600 "$DASHBOARD_LOG"
 rm -f "$STATE_DIR/start-requested"
@@ -343,6 +358,7 @@ done
 }
 
 status RUNNING "MCP server and Secure MCP Tunnel are healthy"
+write_session_state "running"
 printf 'Dashboard: http://127.0.0.1:%s\n' "$DASHBOARD_PORT"
 printf 'Console stays attached. Detach tmux with Ctrl+B, then D.\n'
 printf 'Reconnect with: tmux attach -t remote-agent\n'
