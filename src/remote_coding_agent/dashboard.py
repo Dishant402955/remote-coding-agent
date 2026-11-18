@@ -137,6 +137,8 @@ def _read_tunnel_credentials() -> dict[str, str]:
         value = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError("Tunnel credentials file is invalid") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError("Tunnel credentials file is invalid")
     if not value.get("tunnel_id") or not value.get("api_key"):
         raise RuntimeError("Tunnel credentials are incomplete")
     return {"tunnel_id": str(value["tunnel_id"]), "api_key": str(value["api_key"])}
