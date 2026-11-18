@@ -69,6 +69,11 @@ write_session_state() {
   printf '{"session_id":"%s","status":"%s","started_at":"%s","updated_at":"%s"}\n' \
     "$SESSION_ID" "$next" "$SESSION_STARTED_AT" "$updated" >> "$SESSION_HISTORY_FILE"
   chmod 600 "$SESSION_HISTORY_FILE"
+  if (( $(wc -c < "$SESSION_HISTORY_FILE") > 262144 )); then
+    tail -n 200 "$SESSION_HISTORY_FILE" > "$SESSION_HISTORY_FILE.tmp"
+    chmod 600 "$SESSION_HISTORY_FILE.tmp"
+    mv -f "$SESSION_HISTORY_FILE.tmp" "$SESSION_HISTORY_FILE"
+  fi
 }
 die() { printf '%s | STATUS: FAILED | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; exit 1; }
 port_is_open() { local port="$1"; (echo > "/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1; }
