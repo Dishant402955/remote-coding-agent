@@ -19,6 +19,7 @@ SERVER="$ROOT/.venv/bin/remote-coding-agent"
 PYTHON="$ROOT/.venv/bin/python"
 SERVER_SUPERVISOR="$ROOT/scripts/server-supervisor.sh"
 TUNNEL_USER="remote-coding-agent-tunnel"
+STOP_TUNNEL_HELPER="/usr/local/lib/remote-coding-agent/stop-tunnel-processes.sh"
 TUNNEL_HOME="/var/lib/$TUNNEL_USER"
 SYSTEM_BASE="/usr/local/lib/remote-coding-agent"
 TUNNEL_CLIENT="$SYSTEM_BASE/tunnel-client/tunnel-client"
@@ -31,6 +32,9 @@ DASHBOARD_PORT="$(printenv REMOTE_CODING_AGENT_DASHBOARD_PORT || printf '3333')"
 STATE_DIR="${REMOTE_CODING_AGENT_STATE_DIR:-$HOME/.local/state/remote-coding-agent}"
 DASHBOARD_LOG="/tmp/remote-coding-agent-dashboard.log"
 SESSION_FILE="$STATE_DIR/agent-session.json"
+SESSION_HISTORY_FILE="$STATE_DIR/session-history.jsonl"
+SESSION_ID=""
+STOP_FILE="$STATE_DIR/stop-requested"
 SESSION_STARTED_AT=""
 SERVER_SUPERVISOR_LOG="/tmp/remote-coding-agent-server-supervisor.log"
 SERVER_CHILD_LOG="/tmp/remote-coding-agent-server-child.log"
@@ -59,10 +63,18 @@ write_session_state() {
   [[ -n "$SESSION_STARTED_AT" ]] || return 0
   updated="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   temporary="$SESSION_FILE.tmp"
-  printf '{"status":"%s","started_at":"%s","updated_at":"%s"}\n' \
-    "$next" "$SESSION_STARTED_AT" "$updated" > "$temporary"
+  printf '{"status":"%s","session_id":"%s","started_at":"%s","updated_at":"%s"}\n' \
+    "$next" "$SESSION_ID" "$SESSION_STARTED_AT" "$updated" > "$temporary"
   chmod 600 "$temporary"
   mv -f "$temporary" "$SESSION_FILE"
+  printf '{"session_id":"%s","status":"%s","started_at":"%s","updated_at":"%s"}\n' \
+    "$SESSION_ID" "$next" "$SESSION_STARTED_AT" "$updated" >> "$SESSION_HISTORY_FILE"
+  chmod 600 "$SESSION_HISTORY_FILE"
+  if (( $(wc -c < "$SESSION_HISTORY_FILE") > 262144 )); then
+    tail -n 200 "$SESSION_HISTORY_FILE" > "$SESSION_HISTORY_FILE.tmp"
+    chmod 600 "$SESSION_HISTORY_FILE.tmp"
+    mv -f "$SESSION_HISTORY_FILE.tmp" "$SESSION_HISTORY_FILE"
+  fi
 }
 die() { printf '%s | STATUS: FAILED | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; exit 1; }
 port_is_open() { local port="$1"; (echo > "/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1; }
@@ -88,28 +100,10 @@ cleanup() {
   cleanup_complete=1
 
   if [[ -n "$TUNNEL_PID" ]]; then
-    if sudo -v; then
-      sudo -n /usr/bin/pkill -TERM -u "$TUNNEL_USER" 2>/dev/null || true
-      tunnel_stopped=0
-      for _ in {1..100}; do
-        if ! sudo -n /usr/bin/pgrep -u "$TUNNEL_USER" >/dev/null 2>&1; then
-          tunnel_stopped=1
-          break
-        fi
-        sleep 0.1
-      done
-      if ((tunnel_stopped == 0)); then
-        info "Tunnel did not stop within 10 seconds; forcing remaining tunnel processes to exit"
-        sudo -n /usr/bin/pkill -KILL -u "$TUNNEL_USER" 2>/dev/null || true
-        sleep 0.2
-        if sudo -n /usr/bin/pgrep -u "$TUNNEL_USER" >/dev/null 2>&1; then
-          cleanup_complete=0
-        fi
-      fi
+    if sudo -n "$STOP_TUNNEL_HELPER"; then
       stop_process "$TUNNEL_PID"
-      sudo -K 2>/dev/null || true
     else
-      printf 'STATUS: WARNING | Could not authenticate to stop tunnel service account %s.\n' "$TUNNEL_USER" >&2
+      printf 'STATUS: WARNING | Could not stop tunnel service account %s with the restricted cleanup helper.\n' "$TUNNEL_USER" >&2
       cleanup_complete=0
     fi
   fi
@@ -171,10 +165,11 @@ if port_is_open "$DASHBOARD_PORT"; then die "Dashboard port $DASHBOARD_PORT is a
 mkdir -p "$WORKSPACE" "$STATE_DIR"
 chmod 700 "$WORKSPACE" "$STATE_DIR"
 SESSION_STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+SESSION_ID="$(date -u '+%Y%m%dT%H%M%SZ')-${BASHPID}"
 write_session_state "starting"
 : > "$DASHBOARD_LOG"
 chmod 600 "$DASHBOARD_LOG"
-rm -f "$STATE_DIR/start-requested"
+rm -f "$STATE_DIR/start-requested" "$STOP_FILE"
 env REMOTE_CODING_AGENT_STATE_DIR="$STATE_DIR" \
   REMOTE_CODING_AGENT_DASHBOARD_PORT="$DASHBOARD_PORT" \
   REMOTE_CODING_AGENT_PORT="$PORT" \
@@ -197,9 +192,17 @@ done
 status STARTING "waiting for dashboard authentication and start request"
 printf 'Open the local dashboard: http://127.0.0.1:%s\n' "$DASHBOARD_PORT"
 printf 'Sign in or create your password, configure the tunnel credentials, then click Start agent.\n'
-"$PYTHON" -m remote_coding_agent.dashboard --wait-for-start \
-  --timeout-seconds "${REMOTE_CODING_AGENT_DASHBOARD_SETUP_TIMEOUT_SECONDS:-3600}" || die "Dashboard start request timed out."
-mapfile -t CREDENTIALS < <("$PYTHON" -m remote_coding_agent.dashboard --read-credentials) || die "Could not read dashboard credentials."
+if "$PYTHON" -m remote_coding_agent.dashboard --wait-for-start \
+  --timeout-seconds "${REMOTE_CODING_AGENT_DASHBOARD_SETUP_TIMEOUT_SECONDS:-3600}"; then
+  :
+else
+  wait_status=$?
+  [[ "$wait_status" == "130" ]] && exit 0
+  die "Dashboard start request timed out or failed."
+fi
+CREDENTIALS_OUTPUT="$( "$PYTHON" -m remote_coding_agent.dashboard --read-credentials )" || die "Could not read dashboard credentials."
+mapfile -t CREDENTIALS <<< "$CREDENTIALS_OUTPUT"
+unset CREDENTIALS_OUTPUT
 CONTROL_PLANE_TUNNEL_ID="${CREDENTIALS[0]:-}"
 CONTROL_PLANE_API_KEY="${CREDENTIALS[1]:-}"
 unset CREDENTIALS
@@ -233,6 +236,11 @@ SERVER_PID=$!
 
 server_ready=0
 for _ in {1..120}; do
+  if [[ -f "$STOP_FILE" ]]; then
+    rm -f "$STOP_FILE"
+    info "Dashboard requested a clean agent shutdown"
+    exit 0
+  fi
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
     tail -30 "$SERVER_CHILD_LOG" >&2 || true
     die "MCP server supervisor exited during startup."
@@ -287,6 +295,11 @@ async def main() -> None:
 asyncio.run(main())
 PY
 info "MCP protocol smoke test passed"
+if [[ -f "$STOP_FILE" ]]; then
+  rm -f "$STOP_FILE"
+  info "Dashboard requested a clean agent shutdown"
+  exit 0
+fi
 
 run_tunnel_client_as_service_user() {
   printf '%s\n' "$CONTROL_PLANE_API_KEY" | sudo -n -u "$TUNNEL_USER" -- /usr/bin/env -i \
@@ -313,6 +326,11 @@ unset CONTROL_PLANE_API_KEY
 
 health_listener_ready=0
 for _ in {1..120}; do
+  if [[ -f "$STOP_FILE" ]]; then
+    rm -f "$STOP_FILE"
+    info "Dashboard requested a clean agent shutdown"
+    exit 0
+  fi
   if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
     info "See tunnel diagnostics with: sudo tail -40 $TUNNEL_CLIENT_LOG"
     info "Supervisor status log: $TUNNEL_SUPERVISOR_LOG"
@@ -333,6 +351,11 @@ startup_timeout="${REMOTE_CODING_AGENT_STARTUP_TIMEOUT_SECONDS:-300}"
 tunnel_ready=0
 last_wait_notice=0
 for ((elapsed=0; elapsed<startup_timeout; elapsed++)); do
+  if [[ -f "$STOP_FILE" ]]; then
+    rm -f "$STOP_FILE"
+    info "Dashboard requested a clean agent shutdown"
+    exit 0
+  fi
   if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
     info "See tunnel diagnostics with: sudo tail -40 $TUNNEL_CLIENT_LOG"
     info "Supervisor status log: $TUNNEL_SUPERVISOR_LOG"
@@ -366,5 +389,18 @@ printf 'Server logs: %s | %s\n' "$SERVER_CHILD_LOG" "$SERVER_SUPERVISOR_LOG"
 printf 'Dashboard log: %s\n' "$DASHBOARD_LOG"
 printf 'Tunnel logs (sudo required): %s | %s\n' "$TUNNEL_CLIENT_LOG" "$TUNNEL_SUPERVISOR_LOG"
 
+while kill -0 "$TUNNEL_PID" 2>/dev/null; do
+  if [[ -f "$STOP_FILE" ]]; then
+    rm -f "$STOP_FILE"
+    info "Dashboard requested a clean agent shutdown"
+    exit 0
+  fi
+  sleep 1
+done
+if [[ -f "$STOP_FILE" ]]; then
+  rm -f "$STOP_FILE"
+  info "Dashboard requested a clean agent shutdown"
+  exit 0
+fi
 if wait "$TUNNEL_PID"; then tunnel_status=0; else tunnel_status=$?; fi
 die "Tunnel supervisor exited unexpectedly (code=$tunnel_status)."
