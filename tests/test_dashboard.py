@@ -81,6 +81,7 @@ def test_credential_writer_uses_restricted_helper_and_stdin(monkeypatch) -> None
         dashboard.TUNNEL_USER,
         "--",
         dashboard.STORE_HELPER,
+        "write",
     ]
     assert captured["kwargs"]["input"] == (
         '{"tunnel_id": "tunnel-example", "api_key": "runtime-key-example-123456"}'
@@ -119,3 +120,56 @@ def test_status_reports_running_session_uptime(tmp_path, monkeypatch) -> None:
 
     assert result["session"]["status"] == "running"
     assert result["uptime_seconds"] > 0
+
+
+def test_credential_reader_uses_restricted_helper_and_parses_json(monkeypatch) -> None:
+    captured = {}
+
+    class Result:
+        returncode = 0
+        stdout = json.dumps({
+            "tunnel_id": "tunnel-example",
+            "api_key": "runtime-key-example-123456",
+        })
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return Result()
+
+    monkeypatch.setattr(dashboard.subprocess, "run", fake_run)
+    result = dashboard._read_tunnel_credentials()
+
+    assert result == {
+        "tunnel_id": "tunnel-example",
+        "api_key": "runtime-key-example-123456",
+    }
+    assert captured["command"] == [
+        "sudo",
+        "-n",
+        "-u",
+        dashboard.TUNNEL_USER,
+        "--",
+        dashboard.STORE_HELPER,
+        "read",
+    ]
+    assert captured["kwargs"]["timeout"] == 5
+
+
+def test_credential_reader_rejects_non_object_payload(monkeypatch) -> None:
+    class Result:
+        returncode = 0
+        stdout = "[]"
+
+    monkeypatch.setattr(
+        dashboard.subprocess,
+        "run",
+        lambda *_args, **_kwargs: Result(),
+    )
+
+    try:
+        dashboard._read_tunnel_credentials()
+    except RuntimeError as exc:
+        assert "invalid" in str(exc).lower()
+    else:
+        raise AssertionError("non-object credential payload must be rejected")
