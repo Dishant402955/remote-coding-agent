@@ -31,6 +31,7 @@ DASHBOARD_PORT="$(printenv REMOTE_CODING_AGENT_DASHBOARD_PORT || printf '3333')"
 STATE_DIR="${REMOTE_CODING_AGENT_STATE_DIR:-$HOME/.local/state/remote-coding-agent}"
 DASHBOARD_LOG="/tmp/remote-coding-agent-dashboard.log"
 SESSION_FILE="$STATE_DIR/agent-session.json"
+STOP_FILE="$STATE_DIR/stop-requested"
 SESSION_STARTED_AT=""
 SERVER_SUPERVISOR_LOG="/tmp/remote-coding-agent-server-supervisor.log"
 SERVER_CHILD_LOG="/tmp/remote-coding-agent-server-child.log"
@@ -174,7 +175,7 @@ SESSION_STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 write_session_state "starting"
 : > "$DASHBOARD_LOG"
 chmod 600 "$DASHBOARD_LOG"
-rm -f "$STATE_DIR/start-requested"
+rm -f "$STATE_DIR/start-requested" "$STOP_FILE"
 env REMOTE_CODING_AGENT_STATE_DIR="$STATE_DIR" \
   REMOTE_CODING_AGENT_DASHBOARD_PORT="$DASHBOARD_PORT" \
   REMOTE_CODING_AGENT_PORT="$PORT" \
@@ -199,7 +200,9 @@ printf 'Open the local dashboard: http://127.0.0.1:%s\n' "$DASHBOARD_PORT"
 printf 'Sign in or create your password, configure the tunnel credentials, then click Start agent.\n'
 "$PYTHON" -m remote_coding_agent.dashboard --wait-for-start \
   --timeout-seconds "${REMOTE_CODING_AGENT_DASHBOARD_SETUP_TIMEOUT_SECONDS:-3600}" || die "Dashboard start request timed out."
-mapfile -t CREDENTIALS < <("$PYTHON" -m remote_coding_agent.dashboard --read-credentials) || die "Could not read dashboard credentials."
+CREDENTIALS_OUTPUT="$( "$PYTHON" -m remote_coding_agent.dashboard --read-credentials )" || die "Could not read dashboard credentials."
+mapfile -t CREDENTIALS <<< "$CREDENTIALS_OUTPUT"
+unset CREDENTIALS_OUTPUT
 CONTROL_PLANE_TUNNEL_ID="${CREDENTIALS[0]:-}"
 CONTROL_PLANE_API_KEY="${CREDENTIALS[1]:-}"
 unset CREDENTIALS
@@ -366,5 +369,18 @@ printf 'Server logs: %s | %s\n' "$SERVER_CHILD_LOG" "$SERVER_SUPERVISOR_LOG"
 printf 'Dashboard log: %s\n' "$DASHBOARD_LOG"
 printf 'Tunnel logs (sudo required): %s | %s\n' "$TUNNEL_CLIENT_LOG" "$TUNNEL_SUPERVISOR_LOG"
 
+while kill -0 "$TUNNEL_PID" 2>/dev/null; do
+  if [[ -f "$STOP_FILE" ]]; then
+    rm -f "$STOP_FILE"
+    info "Dashboard requested a clean agent shutdown"
+    exit 0
+  fi
+  sleep 1
+done
+if [[ -f "$STOP_FILE" ]]; then
+  rm -f "$STOP_FILE"
+  info "Dashboard requested a clean agent shutdown"
+  exit 0
+fi
 if wait "$TUNNEL_PID"; then tunnel_status=0; else tunnel_status=$?; fi
 die "Tunnel supervisor exited unexpectedly (code=$tunnel_status)."
