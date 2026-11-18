@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import json
 import logging
+import os
 import re
 import sys
+import threading
 import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +26,30 @@ from remote_coding_agent.config import Settings
 from remote_coding_agent.executor import CommandExecutionError, execute_command
 
 logger = logging.getLogger("remote_coding_agent")
+_HISTORY_LOCK = threading.Lock()
+_STATE_DIR = Path(os.getenv(
+    "REMOTE_CODING_AGENT_STATE_DIR",
+    str(Path.home() / ".local" / "state" / "remote-coding-agent"),
+)).expanduser()
+_HISTORY_FILE = _STATE_DIR / "command-history.jsonl"
+
+
+def _record_command(event: dict[str, Any]) -> None:
+    """Append a redacted command lifecycle event to the private dashboard history."""
+    try:
+        _STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(_STATE_DIR, 0o700)
+        payload = json.dumps(event, separators=(",", ":")) + "\\n"
+        with _HISTORY_LOCK:
+            descriptor = os.open(_HISTORY_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                os.write(descriptor, payload.encode("utf-8"))
+            finally:
+                os.close(descriptor)
+            os.chmod(_HISTORY_FILE, 0o600)
+    except OSError:
+        logger.warning("Could not persist dashboard command history")
+
 _REDACTION_PATTERNS = (
     re.compile(
         r"(?i)([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL|AUTHORIZATION)[A-Z0-9_]*\s*=\s*)(?:\"[^\"]*\"|'[^']*'|[^\s;&|]+)"
@@ -200,6 +228,15 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
             if isinstance(working_directory, str)
             else "<workspace-root>"
         )
+        started_at = datetime.now(UTC).isoformat(timespec="milliseconds")
+        _record_command({
+            "id": invocation_id,
+            "started_at": started_at,
+            "command": preview,
+            "cwd": requested_cwd,
+            "timeout_seconds": timeout,
+            "status": "running",
+        })
         logger.info(
             "TOOL START id=%s name=run_command command=%s cwd=%s timeout_seconds=%s",
             invocation_id,
@@ -209,13 +246,22 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
         )
 
         def report(result: dict[str, Any]) -> dict[str, Any]:
+            duration = time.monotonic() - started
+            _record_command({
+                "id": invocation_id,
+                "finished_at": datetime.now(UTC).isoformat(timespec="milliseconds"),
+                "duration_seconds": round(duration, 3),
+                "exit_code": result.get("exit_code"),
+                "status": "success" if result.get("exit_code") == 0 and not result.get("timed_out") else "failed",
+                "timed_out": bool(result.get("timed_out")),
+            })
             logger.info(
                 "TOOL END id=%s name=run_command exit_code=%s timed_out=%s "
                 "duration_seconds=%.3f output_truncated=%s",
                 invocation_id,
                 result.get("exit_code"),
                 result.get("timed_out"),
-                time.monotonic() - started,
+                duration,
                 result.get("output_truncated"),
             )
             return result
