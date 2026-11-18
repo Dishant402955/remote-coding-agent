@@ -177,7 +177,7 @@ if port_is_open "$DASHBOARD_PORT"; then die "Dashboard port $DASHBOARD_PORT is a
 mkdir -p "$WORKSPACE" "$STATE_DIR"
 chmod 700 "$WORKSPACE" "$STATE_DIR"
 SESSION_STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-SESSION_ID="$(date -u '+%Y%m%dT%H%M%SZ')-$"
+SESSION_ID="$(date -u '+%Y%m%dT%H%M%SZ')-${BASHPID}"
 write_session_state "starting"
 : > "$DASHBOARD_LOG"
 chmod 600 "$DASHBOARD_LOG"
@@ -248,6 +248,11 @@ SERVER_PID=$!
 
 server_ready=0
 for _ in {1..120}; do
+  if [[ -f "$STOP_FILE" ]]; then
+    rm -f "$STOP_FILE"
+    info "Dashboard requested a clean agent shutdown"
+    exit 0
+  fi
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
     tail -30 "$SERVER_CHILD_LOG" >&2 || true
     die "MCP server supervisor exited during startup."
@@ -302,6 +307,11 @@ async def main() -> None:
 asyncio.run(main())
 PY
 info "MCP protocol smoke test passed"
+if [[ -f "$STOP_FILE" ]]; then
+  rm -f "$STOP_FILE"
+  info "Dashboard requested a clean agent shutdown"
+  exit 0
+fi
 
 run_tunnel_client_as_service_user() {
   printf '%s\n' "$CONTROL_PLANE_API_KEY" | sudo -n -u "$TUNNEL_USER" -- /usr/bin/env -i \
