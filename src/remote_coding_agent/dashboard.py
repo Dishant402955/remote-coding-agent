@@ -34,6 +34,7 @@ STOP_FILE = STATE_DIR / "stop-requested"
 TUNNEL_USER = "remote-coding-agent-tunnel"
 STORE_HELPER = "/usr/local/lib/remote-coding-agent/store-tunnel-credentials.sh"
 SESSION_FILE = STATE_DIR / "agent-session.json"
+SESSION_HISTORY_FILE = STATE_DIR / "session-history.jsonl"
 HOST = "127.0.0.1"
 PORT = int(os.getenv("REMOTE_CODING_AGENT_DASHBOARD_PORT", "3333"))
 MCP_PORT = int(os.getenv("REMOTE_CODING_AGENT_PORT", "8000"))
@@ -68,7 +69,7 @@ document.getElementById('logout').onclick=async()=>{await api('/api/logout',{met
 document.getElementById('settings').onclick=settingsPage;document.getElementById('start').onclick=async()=>{try{await api('/api/start',{method:'POST',body:'{}'});startRequested=true;document.getElementById('start').textContent='Starting…';document.getElementById('start').disabled=true}catch(e){alert(e.message)}};document.getElementById('stop').onclick=async()=>{if(!confirm('Stop the agent and its Secure MCP Tunnel?'))return;try{await api('/api/stop',{method:'POST',body:'{}'});document.getElementById('stop').textContent='Stopping…';document.getElementById('stop').disabled=true}catch(e){alert(e.message)}};document.getElementById('refresh').onclick=refresh;document.getElementById('search').oninput=renderHistory;refresh();setInterval(refresh,3000);setInterval(()=>document.getElementById('clock').textContent=new Date().toLocaleTimeString(),1000)}
 function renderHistory(){let q=(document.getElementById('search')?.value||'').toLowerCase();let rows=items.filter(x=>(x.command+' '+x.cwd).toLowerCase().includes(q));let el=document.getElementById('history');if(!rows.length){el.innerHTML='<div class="empty">No matching commands yet. Run a command through your MCP agent and it will appear here.</div>';return}el.innerHTML=rows.map(x=>'<div class="historyrow"><div class="time">'+esc(new Date(x.started_at).toLocaleString())+'</div><div><div class="cmd">$ '+esc(x.command)+'</div><div class="cwd">'+esc(x.cwd||'workspace root')+' · '+(x.duration_seconds==null?'running':esc(Number(x.duration_seconds).toFixed(2)+'s'))+'</div></div><div class="state '+(x.status==='success'?'ok':x.status==='running'?'':'fail')+'">'+(x.status==='success'?'EXIT 0':x.status==='running'?'RUNNING':'EXIT '+esc(x.exit_code??'ERR'))+'</div></div>').join('')}
 function durationLabel(seconds){if(seconds==null)return 'Not running';let h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),v=seconds%60;return h+'h '+m+'m '+v+'s'}
-async function refresh(){try{let d=await api('/api/status');statusData=d;if(d.session?.status==='stopped'&&!d.mcp)startRequested=false;let sessionStatus=d.session?.status||'stopped';document.getElementById('start').hidden=!!d.mcp||sessionStatus==='running'||sessionStatus==='starting'||startRequested;document.getElementById('start').disabled=sessionStatus==='starting'||startRequested;document.getElementById('stop').hidden=!(d.mcp||d.tunnel||sessionStatus==='running');document.getElementById('stop').disabled=sessionStatus==='stopping';let sessionTone=sessionStatus==='running'?'ok':sessionStatus==='starting'?'':'bad';document.getElementById('session').innerHTML='<span class="dot '+sessionTone+'"></span>'+(sessionStatus==='running'?'Running':sessionStatus==='starting'?'Starting':'Stopped');document.getElementById('sessionnote').textContent=sessionStatus==='running'?'Uptime '+durationLabel(d.uptime_seconds):sessionStatus==='starting'?'Launcher is preparing the agent':'No active agent session';document.getElementById('mcp').innerHTML='<span class="dot '+(d.mcp?'ok':'bad')+'"></span>'+(d.mcp?'Online':'Offline');document.getElementById('mcpnote').textContent='127.0.0.1:'+d.mcp_port;document.getElementById('tunnel').innerHTML='<span class="dot '+(d.tunnel?'ok':'bad')+'"></span>'+(d.tunnel?'Connected':'Offline');document.getElementById('tunnelnote').textContent=d.control_plane?'Control plane healthy':'Waiting for tunnel';items=d.history||[];document.getElementById('count').textContent=d.total_commands;document.getElementById('last').textContent=d.last_command?'Last activity '+new Date(d.last_command).toLocaleTimeString():'No command activity yet';renderHistory()}catch(e){if(e.message.includes('Unauthorized'))authPage(false)}}
+async function refresh(){try{let d=await api('/api/status');statusData=d;if(d.session?.status==='stopped'&&!d.mcp)startRequested=false;let sessionStatus=d.session?.status||'stopped';document.getElementById('start').hidden=!!d.mcp||sessionStatus==='running'||sessionStatus==='starting'||startRequested;document.getElementById('start').disabled=sessionStatus==='starting'||startRequested;document.getElementById('stop').hidden=!(d.mcp||d.tunnel||sessionStatus==='running'||sessionStatus==='starting');document.getElementById('stop').disabled=sessionStatus==='stopping';let sessionTone=sessionStatus==='running'?'ok':sessionStatus==='starting'?'':'bad';document.getElementById('session').innerHTML='<span class="dot '+sessionTone+'"></span>'+(sessionStatus==='running'?'Running':sessionStatus==='starting'?'Starting':'Stopped');document.getElementById('sessionnote').textContent=sessionStatus==='running'?'Uptime '+durationLabel(d.uptime_seconds):sessionStatus==='starting'?'Launcher is preparing the agent':'No active agent session';document.getElementById('mcp').innerHTML='<span class="dot '+(d.mcp?'ok':'bad')+'"></span>'+(d.mcp?'Online':'Offline');document.getElementById('mcpnote').textContent='127.0.0.1:'+d.mcp_port;document.getElementById('tunnel').innerHTML='<span class="dot '+(d.tunnel?'ok':'bad')+'"></span>'+(d.tunnel?'Connected':'Offline');document.getElementById('tunnelnote').textContent=d.control_plane?'Control plane healthy':'Waiting for tunnel';items=d.history||[];document.getElementById('count').textContent=d.total_commands;document.getElementById('last').textContent=d.last_command?'Last activity '+new Date(d.last_command).toLocaleTimeString():'No command activity yet';renderHistory()}catch(e){if(e.message.includes('Unauthorized'))authPage(false)}}
 function settingsPage(){app.innerHTML='<div class="shell"><header class="top"><div class="brand"><div class="logo">R</div><div><h1>Remote Agent</h1><small>Settings</small></div></div><button class="btn secondary" id="back">Back to dashboard</button></header><h2>Dashboard settings</h2><p class="sub">Update your local dashboard password or Secure MCP Tunnel credentials.</p><div class="card" style="max-width:620px"><form id="settingsform"><label class="field"><span>Current dashboard password</span><input name="current_password" type="password" required></label><label class="field"><span>New dashboard password (optional)</span><input name="new_password" type="password" minlength="12" placeholder="Leave blank to keep current"></label><label class="field"><span>Tunnel ID</span><input name="tunnel_id" autocomplete="off" required></label><label class="field"><span>Runtime API key</span><input name="api_key" type="password" placeholder="Leave blank to keep saved key"></label><div class="hint">Tunnel credentials are stored under the isolated tunnel service account, not your normal home directory. Key or tunnel ID changes are saved immediately and take effect after the next agent restart. Password changes take effect immediately.</div><button class="btn wide">Save settings</button><div class="error" id="error"></div></form></div></div>';api('/api/settings').then(d=>{document.querySelector('[name=tunnel_id]').value=d.tunnel_id||''}).catch(()=>{});document.getElementById('back').onclick=dashboard;document.getElementById('settingsform').onsubmit=async e=>{e.preventDefault();let f=new FormData(e.target),b=Object.fromEntries(f.entries());try{await api('/api/settings',{method:'POST',body:JSON.stringify(b)});dashboard()}catch(x){document.getElementById('error').textContent=x.message}}}
 async function boot(){try{let d=await api('/api/auth-state');if(!d.configured){authPage(true);return}if(!d.authenticated){authPage(false);return}dashboard()}catch(e){authPage(false)}}
 boot();
@@ -158,6 +159,27 @@ def _verify_password(password: str, config: dict[str, Any]) -> bool:
         return False
 
 
+def _session_history() -> list[dict[str, Any]]:
+    """Merge lifecycle events into the latest persistent agent sessions."""
+    try:
+        lines = SESSION_HISTORY_FILE.read_text(encoding="utf-8").splitlines()[-200:]
+    except OSError:
+        return []
+    sessions: dict[str, dict[str, Any]] = {}
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or not event.get("session_id"):
+            continue
+        item = sessions.setdefault(str(event["session_id"]), {})
+        item.update(event)
+    result = list(sessions.values())
+    result.sort(key=lambda item: item.get("started_at", ""), reverse=True)
+    return result[:20]
+
+
 def _history() -> list[dict[str, Any]]:
     try:
         lines = HISTORY_FILE.read_text(encoding="utf-8").splitlines()[-MAX_HISTORY * 2:]
@@ -216,6 +238,7 @@ def _status() -> dict[str, Any]:
         "mcp_port": MCP_PORT, "history": history, "total_commands": len(history),
         "last_command": history[0].get("started_at") if history else None,
         "session": session, "uptime_seconds": uptime_seconds,
+        "sessions": _session_history(),
     }
 
 
@@ -419,6 +442,9 @@ def _serve() -> None:
 def _wait_for_start(timeout: int) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if STOP_FILE.exists():
+            STOP_FILE.unlink(missing_ok=True)
+            raise SystemExit(130)
         if START_FILE.exists():
             START_FILE.unlink(missing_ok=True)
             return
