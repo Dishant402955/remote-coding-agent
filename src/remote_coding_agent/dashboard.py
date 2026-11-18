@@ -1,5 +1,7 @@
 """Tiny, dependency-free local dashboard for the Remote Coding Agent."""
 
+# ruff: noqa: E501  # The embedded HTML/CSS/JS is intentionally kept in one static string.
+
 from __future__ import annotations
 
 import argparse
