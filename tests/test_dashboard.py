@@ -173,3 +173,41 @@ def test_credential_reader_rejects_non_object_payload(monkeypatch) -> None:
         assert "invalid" in str(exc).lower()
     else:
         raise AssertionError("non-object credential payload must be rejected")
+
+
+def test_session_history_merges_lifecycle_events(tmp_path, monkeypatch) -> None:
+    history_file = tmp_path / "session-history.jsonl"
+    monkeypatch.setattr(dashboard, "SESSION_HISTORY_FILE", history_file)
+    history_file.write_text(
+        "\\n".join(
+            [
+                json.dumps({
+                    "session_id": "session-1",
+                    "status": "starting",
+                    "started_at": "2026-11-18T09:00:00Z",
+                    "updated_at": "2026-11-18T09:00:00Z",
+                }),
+                json.dumps({
+                    "session_id": "session-1",
+                    "status": "stopped",
+                    "started_at": "2026-11-18T09:00:00Z",
+                    "updated_at": "2026-11-18T10:00:00Z",
+                }),
+                json.dumps({
+                    "session_id": "session-2",
+                    "status": "running",
+                    "started_at": "2026-11-18T11:00:00Z",
+                    "updated_at": "2026-11-18T11:00:00Z",
+                }),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = dashboard._session_history()
+
+    assert len(result) == 2
+    assert result[0]["session_id"] == "session-2"
+    assert result[1]["session_id"] == "session-1"
+    assert result[1]["status"] == "stopped"
+    assert result[1]["updated_at"] == "2026-11-18T10:00:00Z"
