@@ -58,9 +58,9 @@ write_session_state() {
   local next="$1" updated temporary
   [[ -n "$SESSION_STARTED_AT" ]] || return 0
   updated="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-  temporary="$SESSION_FILE.tmp.$"
-  printf '{"status":"%s","started_at":"%s","updated_at":"%s","launcher_pid":%s}\n' \
-    "$next" "$SESSION_STARTED_AT" "$updated" "$" > "$temporary"
+  temporary="$SESSION_FILE.tmp"
+  printf '{"status":"%s","started_at":"%s","updated_at":"%s"}\\n' \
+    "$next" "$SESSION_STARTED_AT" "$updated" > "$temporary"
   chmod 600 "$temporary"
   mv -f "$temporary" "$SESSION_FILE"
 }
