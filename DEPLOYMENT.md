@@ -57,12 +57,11 @@ Run:
 ./scripts/up.sh
 ```
 
-The script first asks sudo to authorize the dedicated tunnel account. It then prompts for:
+The script first asks sudo to authorize the dedicated tunnel account, then starts a dependency-free dashboard at **http://127.0.0.1:3333**. Open it in a browser on the Ubuntu machine. On first use, create a dashboard password and enter the existing Tunnel ID and Runtime API Key. The launcher waits for this setup before starting the MCP server and tunnel. Later starts load the saved credentials automatically. Use the dashboard's Settings page to change the password, Tunnel ID, or API key; credential changes apply after restarting the agent.
 
-- **Existing Tunnel ID** (shown while typing).
-- **Runtime API Key** (hidden while typing).
+The dashboard is intentionally bound to loopback only. For a remote Ubuntu host, use SSH local port forwarding (for example, `ssh -L 3333:127.0.0.1:3333 user@host`) and then browse to `http://127.0.0.1:3333` on your local machine. Do not bind the dashboard to a public interface.
 
-It does not write either value into `.env`, shell startup files, or the repository. The MCP server runs as your normal user with a minimal environment that does not contain the key. `tunnel-client` runs as `remote-coding-agent-tunnel`; the key is sent to that account over stdin and exported only in its process environment. Once the tunnel health listener starts, the launcher clears the normal user's cached sudo authorization before waiting for OpenAI control-plane readiness.
+The dashboard password is stored as a salted PBKDF2-HMAC-SHA256 hash. The tunnel ID and runtime API key are stored in `~/.local/state/remote-coding-agent/dashboard.json` with directory mode `700` and file mode `600`. The API key is not encrypted at rest; protection relies on the Linux account's file permissions and, ideally, full-disk encryption. Keep the machine account trusted. The MCP server runs as your normal user with a minimal environment that does not contain the key. `tunnel-client` runs as `remote-coding-agent-tunnel`; the key is sent to that account over stdin and exported only in its process environment. Once the tunnel health listener starts, the launcher clears the normal user's cached sudo authorization before waiting for OpenAI control-plane readiness.
 
 Before starting the tunnel, the script:
 
@@ -139,7 +138,7 @@ Expected responses are `live` and `ready`. The control-plane JSON should contain
 
 The MCP readiness endpoints are `http://127.0.0.1:8000/healthz` and `/readyz`. The tunnel-client health listener is `http://127.0.0.1:18080/healthz`, `/readyz`, and `/health/control-plane`.
 
-The main logs are `/tmp/remote-coding-agent-server-child.log` and `/tmp/remote-coding-agent-server-supervisor.log`. The child log includes MCP HTTP access records (`ACCESS START` / `ACCESS END`) and command audit records (`TOOL START` / `TOOL END`). Command records contain a shortened preview, working directory, timeout, exit code, and duration. Common credential forms are redacted; request bodies, authorization headers, MCP session IDs, and command stdout/stderr are never copied into these audit records. Server child output is mirrored into the attached tmux terminal as well as the child log.
+The dashboard is available at `http://127.0.0.1:3333` while the launcher is running. It shows MCP/tunnel health and the latest 500 command records, including timestamps, duration, working directory, and exit status. Command history is persisted at `~/.local/state/remote-coding-agent/command-history.jsonl` with owner-only permissions. The main logs are `/tmp/remote-coding-agent-server-child.log` and `/tmp/remote-coding-agent-server-supervisor.log`. The child log includes MCP HTTP access records (`ACCESS START` / `ACCESS END`) and command audit records (`TOOL START` / `TOOL END`). Command records contain a shortened preview, working directory, timeout, exit code, and duration. Common credential forms are redacted; request bodies, authorization headers, MCP session IDs, and command stdout/stderr are never copied into these audit records. Server child output is mirrored into the attached tmux terminal as well as the child log.
 
 Follow the live MCP and command audit log from another terminal with:
 
