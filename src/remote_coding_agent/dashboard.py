@@ -167,7 +167,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _body(self) -> dict[str, Any]:
-        length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+        length = int(self.headers.get("Content-Length", "0"))
+        if length > 16_384:
+            raise ValueError("Request body is too large")
         if length <= 0:
             return {}
         return json.loads(self.rfile.read(length))
