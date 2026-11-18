@@ -27,6 +27,11 @@ TUNNEL_PATH="$SYSTEM_BASE/tunnel-client:/usr/bin:/bin"
 WORKSPACE="$ROOT/workspace"
 PORT="$(printenv REMOTE_CODING_AGENT_PORT || printf '8000')"
 HEALTH_PORT="$(printenv REMOTE_CODING_AGENT_HEALTH_PORT || printf '18080')"
+DASHBOARD_PORT="$(printenv REMOTE_CODING_AGENT_DASHBOARD_PORT || printf '3333')"
+STATE_DIR="${REMOTE_CODING_AGENT_STATE_DIR:-$HOME/.local/state/remote-coding-agent}"
+DASHBOARD_LOG="/tmp/remote-coding-agent-dashboard.log"
+SESSION_FILE="$STATE_DIR/agent-session.json"
+SESSION_STARTED_AT=""
 SERVER_SUPERVISOR_LOG="/tmp/remote-coding-agent-server-supervisor.log"
 SERVER_CHILD_LOG="/tmp/remote-coding-agent-server-child.log"
 TUNNEL_CLIENT_LOG="/tmp/remote-coding-agent-tunnel-client.log"
@@ -36,6 +41,7 @@ MCP_READY_URL="http://127.0.0.1:${PORT}/readyz"
 HEALTH_URL="http://127.0.0.1:${HEALTH_PORT}"
 SERVER_PID=""
 TUNNEL_PID=""
+DASHBOARD_PID=""
 CONTROL_PLANE_TUNNEL_ID=""
 CONTROL_PLANE_API_KEY=""
 STATE="STOPPED"
@@ -48,6 +54,16 @@ status() {
   STATE="$next"
 }
 info() { printf '%s | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+write_session_state() {
+  local next="$1" updated temporary
+  [[ -n "$SESSION_STARTED_AT" ]] || return 0
+  updated="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  temporary="$SESSION_FILE.tmp"
+  printf '{"status":"%s","started_at":"%s","updated_at":"%s"}\n' \
+    "$next" "$SESSION_STARTED_AT" "$updated" > "$temporary"
+  chmod 600 "$temporary"
+  mv -f "$temporary" "$SESSION_FILE"
+}
 die() { printf '%s | STATUS: FAILED | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; exit 1; }
 port_is_open() { local port="$1"; (echo > "/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1; }
 
@@ -99,6 +115,8 @@ cleanup() {
   fi
 
   stop_process "$SERVER_PID"
+  stop_process "$DASHBOARD_PID"
+  write_session_state "stopped"
   unset CONTROL_PLANE_API_KEY CONTROL_PLANE_TUNNEL_ID
   sudo -K 2>/dev/null || true
   if ((cleanup_complete)); then
@@ -129,7 +147,8 @@ command -v setsid >/dev/null 2>&1 || die "setsid is missing."
 command -v sudo >/dev/null 2>&1 || die "sudo is required."
 [[ "$PORT" =~ ^[0-9]+$ ]] && ((PORT >= 1 && PORT <= 65535)) || die "Invalid MCP port."
 [[ "$HEALTH_PORT" =~ ^[0-9]+$ ]] && ((HEALTH_PORT >= 1 && HEALTH_PORT <= 65535)) || die "Invalid tunnel health port."
-[[ "$PORT" != "$HEALTH_PORT" ]] || die "MCP and tunnel health ports must differ."
+[[ "$DASHBOARD_PORT" =~ ^[0-9]+$ ]] && ((DASHBOARD_PORT >= 1 && DASHBOARD_PORT <= 65535)) || die "Invalid dashboard port."
+[[ "$PORT" != "$HEALTH_PORT" && "$PORT" != "$DASHBOARD_PORT" && "$HEALTH_PORT" != "$DASHBOARD_PORT" ]] || die "MCP, dashboard, and tunnel health ports must differ."
 
 ACCOUNT_ENTRY="$(getent passwd "$TUNNEL_USER")" || die "Tunnel service account missing; rerun setup."
 IFS=: read -r _ _ ACCOUNT_UID _ _ ACCOUNT_HOME ACCOUNT_SHELL <<< "$ACCOUNT_ENTRY"
@@ -147,14 +166,44 @@ if sudo -n /usr/bin/pgrep -u "$TUNNEL_USER" >/dev/null 2>&1; then
 fi
 if port_is_open "$PORT"; then die "MCP port $PORT is already in use. Stop the existing server first."; fi
 if port_is_open "$HEALTH_PORT"; then die "Tunnel health port $HEALTH_PORT is already in use."; fi
+if port_is_open "$DASHBOARD_PORT"; then die "Dashboard port $DASHBOARD_PORT is already in use."; fi
 
-mkdir -p "$WORKSPACE"
-chmod 700 "$WORKSPACE"
-read -r -p "Existing Tunnel ID: " CONTROL_PLANE_TUNNEL_ID
-read -r -s -p "Runtime API Key: " CONTROL_PLANE_API_KEY
-echo
-[[ -n "$CONTROL_PLANE_TUNNEL_ID" ]] || die "Tunnel ID is required."
-[[ -n "$CONTROL_PLANE_API_KEY" ]] || die "Runtime API key is required."
+mkdir -p "$WORKSPACE" "$STATE_DIR"
+chmod 700 "$WORKSPACE" "$STATE_DIR"
+SESSION_STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+write_session_state "starting"
+: > "$DASHBOARD_LOG"
+chmod 600 "$DASHBOARD_LOG"
+rm -f "$STATE_DIR/start-requested"
+env REMOTE_CODING_AGENT_STATE_DIR="$STATE_DIR" \
+  REMOTE_CODING_AGENT_DASHBOARD_PORT="$DASHBOARD_PORT" \
+  REMOTE_CODING_AGENT_PORT="$PORT" \
+  REMOTE_CODING_AGENT_HEALTH_PORT="$HEALTH_PORT" \
+  "$PYTHON" -m remote_coding_agent.dashboard >>"$DASHBOARD_LOG" 2>&1 &
+DASHBOARD_PID=$!
+dashboard_ready=0
+for _ in {1..80}; do
+  if ! kill -0 "$DASHBOARD_PID" 2>/dev/null; then
+    tail -30 "$DASHBOARD_LOG" >&2 || true
+    die "Dashboard exited during startup."
+  fi
+  if curl -fsS --max-time 1 "http://127.0.0.1:${DASHBOARD_PORT}/" >/dev/null 2>&1; then
+    dashboard_ready=1
+    break
+  fi
+  sleep 0.25
+done
+[[ "$dashboard_ready" == "1" ]] || die "Dashboard did not become ready within 20 seconds."
+status STARTING "waiting for dashboard authentication and start request"
+printf 'Open the local dashboard: http://127.0.0.1:%s\n' "$DASHBOARD_PORT"
+printf 'Sign in or create your password, configure the tunnel credentials, then click Start agent.\n'
+"$PYTHON" -m remote_coding_agent.dashboard --wait-for-start \
+  --timeout-seconds "${REMOTE_CODING_AGENT_DASHBOARD_SETUP_TIMEOUT_SECONDS:-3600}" || die "Dashboard start request timed out."
+mapfile -t CREDENTIALS < <("$PYTHON" -m remote_coding_agent.dashboard --read-credentials) || die "Could not read dashboard credentials."
+CONTROL_PLANE_TUNNEL_ID="${CREDENTIALS[0]:-}"
+CONTROL_PLANE_API_KEY="${CREDENTIALS[1]:-}"
+unset CREDENTIALS
+[[ -n "$CONTROL_PLANE_TUNNEL_ID" && -n "$CONTROL_PLANE_API_KEY" ]] || die "Dashboard credentials are incomplete."
 
 status STARTING "preparing MCP server"
 : > "$SERVER_SUPERVISOR_LOG"
@@ -168,6 +217,7 @@ env -i \
   REMOTE_CODING_AGENT_TEST_MODE=false \
   REMOTE_CODING_AGENT_HOST=127.0.0.1 \
   REMOTE_CODING_AGENT_PORT="$PORT" \
+  REMOTE_CODING_AGENT_STATE_DIR="$STATE_DIR" \
   REMOTE_CODING_AGENT_WORKSPACE="$WORKSPACE" \
   REMOTE_CODING_AGENT_DEFAULT_TIMEOUT_SECONDS="${REMOTE_CODING_AGENT_DEFAULT_TIMEOUT_SECONDS:-120}" \
   REMOTE_CODING_AGENT_MAX_TIMEOUT_SECONDS="${REMOTE_CODING_AGENT_MAX_TIMEOUT_SECONDS:-3600}" \
@@ -308,9 +358,12 @@ done
 }
 
 status RUNNING "MCP server and Secure MCP Tunnel are healthy"
+write_session_state "running"
+printf 'Dashboard: http://127.0.0.1:%s\n' "$DASHBOARD_PORT"
 printf 'Console stays attached. Detach tmux with Ctrl+B, then D.\n'
 printf 'Reconnect with: tmux attach -t remote-agent\n'
 printf 'Server logs: %s | %s\n' "$SERVER_CHILD_LOG" "$SERVER_SUPERVISOR_LOG"
+printf 'Dashboard log: %s\n' "$DASHBOARD_LOG"
 printf 'Tunnel logs (sudo required): %s | %s\n' "$TUNNEL_CLIENT_LOG" "$TUNNEL_SUPERVISOR_LOG"
 
 if wait "$TUNNEL_PID"; then tunnel_status=0; else tunnel_status=$?; fi
