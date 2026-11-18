@@ -1,12 +1,36 @@
 #!/usr/bin/env bash
-# Store tunnel credentials as the dedicated tunnel account.
+# Read or atomically store tunnel credentials as the dedicated tunnel account.
 set -Eeuo pipefail
 umask 077
 
 TUNNEL_HOME="/var/lib/remote-coding-agent-tunnel"
 TARGET="$TUNNEL_HOME/credentials.json"
+MODE="${1:-}"
 
-python3 - "$TARGET" <<'PY'
+case "$MODE" in
+  read)
+    python3 - "$TARGET" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        value = json.load(stream)
+except (OSError, json.JSONDecodeError) as exc:
+    raise SystemExit("tunnel credentials are unavailable or invalid") from exc
+if not isinstance(value, dict):
+    raise SystemExit("tunnel credentials must be an object")
+tunnel_id = value.get("tunnel_id")
+api_key = value.get("api_key")
+if not isinstance(tunnel_id, str) or not tunnel_id.strip():
+    raise SystemExit("tunnel_id is missing")
+if not isinstance(api_key, str) or len(api_key.strip()) < 16:
+    raise SystemExit("api_key is missing or invalid")
+print(json.dumps({"tunnel_id": tunnel_id, "api_key": api_key}, separators=(",", ":")))
+PY
+    ;;
+  write)
+    python3 - "$TARGET" <<'PY'
 import json
 import os
 import sys
@@ -56,3 +80,9 @@ finally:
     if os.path.exists(temp_path):
         os.unlink(temp_path)
 PY
+    ;;
+  *)
+    printf 'Usage: %s {read|write}\n' "$0" >&2
+    exit 2
+    ;;
+esac
