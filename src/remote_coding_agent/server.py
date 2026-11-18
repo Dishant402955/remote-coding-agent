@@ -252,7 +252,11 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
                 "finished_at": datetime.now(UTC).isoformat(timespec="milliseconds"),
                 "duration_seconds": round(duration, 3),
                 "exit_code": result.get("exit_code"),
-                "status": "success" if result.get("exit_code") == 0 and not result.get("timed_out") else "failed",
+                "status": (
+                    "success"
+                    if result.get("exit_code") == 0 and not result.get("timed_out")
+                    else "failed"
+                ),
                 "timed_out": bool(result.get("timed_out")),
             })
             logger.info(
