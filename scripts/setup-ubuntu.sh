@@ -196,12 +196,15 @@ sudo -u "$TUNNEL_USER" -- "$SYSTEM_STAGING_DIR/tunnel-client" --version >/dev/nu
 sudo install -o root -g root -m 755 "$ROOT/scripts/tunnel-client-supervisor.sh" "$SYSTEM_BASE/tunnel-client-supervisor.sh"
 STORE_CREDENTIALS_HELPER="$SYSTEM_BASE/store-tunnel-credentials.sh"
 sudo install -o root -g root -m 755 "$ROOT/scripts/store-tunnel-credentials.sh" "$STORE_CREDENTIALS_HELPER"
+STOP_TUNNEL_HELPER="$SYSTEM_BASE/stop-tunnel-processes.sh"
+sudo install -o root -g root -m 755 "$ROOT/scripts/stop-tunnel-processes.sh" "$STOP_TUNNEL_HELPER"
 
-# Permit only the dedicated tunnel account to receive credential updates.
+# Permit only fixed-purpose credential and tunnel-cleanup operations.
 SUDOERS_FILE="/etc/sudoers.d/remote-coding-agent-dashboard-$UID"
 SUDOERS_STAGE="/etc/sudoers.d/.remote-coding-agent-dashboard-$UID.new"
 SUDOERS_TEMP="$(mktemp)"
-printf '%s ALL=(%s) NOPASSWD: %s\n' "$(id -un)" "$TUNNEL_USER" "$STORE_CREDENTIALS_HELPER" > "$SUDOERS_TEMP"
+printf '%s ALL=(%s) NOPASSWD: %s read, %s write\n' "$(id -un)" "$TUNNEL_USER" "$STORE_CREDENTIALS_HELPER" "$STORE_CREDENTIALS_HELPER" > "$SUDOERS_TEMP"
+printf '%s ALL=(root) NOPASSWD: %s\n' "$(id -un)" "$STOP_TUNNEL_HELPER" >> "$SUDOERS_TEMP"
 sudo install -o root -g root -m 440 "$SUDOERS_TEMP" "$SUDOERS_STAGE"
 sudo visudo -cf "$SUDOERS_STAGE" >/dev/null
 sudo mv -f "$SUDOERS_STAGE" "$SUDOERS_FILE"
