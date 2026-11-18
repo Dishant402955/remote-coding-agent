@@ -26,6 +26,14 @@ tunnel_id = incoming.get("tunnel_id")
 api_key = incoming.get("api_key")
 if not isinstance(tunnel_id, str) or not tunnel_id.strip():
     raise SystemExit("tunnel_id is required")
+if not isinstance(api_key, str):
+    raise SystemExit("api_key must be a string")
+if not api_key.strip() and os.path.exists(target):
+    try:
+        with open(target, encoding="utf-8") as current:
+            api_key = json.load(current).get("api_key", "")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        raise SystemExit("existing credentials are invalid")
 if not isinstance(api_key, str) or len(api_key.strip()) < 16:
     raise SystemExit("api_key is required")
 
