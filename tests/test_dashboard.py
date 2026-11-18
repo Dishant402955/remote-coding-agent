@@ -32,8 +32,19 @@ def test_command_history_merges_start_and_finish_events(tmp_path, monkeypatch) -
     history_file.write_text(
         "\n".join(
             [
-                json.dumps({"id": "abc", "started_at": "2026-11-18T09:00:00Z", "command": "pwd", "status": "running"}),
-                json.dumps({"id": "abc", "finished_at": "2026-11-18T09:00:01Z", "duration_seconds": 1.0, "exit_code": 0, "status": "success"}),
+                json.dumps({
+                    "id": "abc",
+                    "started_at": "2026-11-18T09:00:00Z",
+                    "command": "pwd",
+                    "status": "running",
+                }),
+                json.dumps({
+                    "id": "abc",
+                    "finished_at": "2026-11-18T09:00:01Z",
+                    "duration_seconds": 1.0,
+                    "exit_code": 0,
+                    "status": "success",
+                }),
             ]
         ),
         encoding="utf-8",
