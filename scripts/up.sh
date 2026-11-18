@@ -316,6 +316,11 @@ unset CONTROL_PLANE_API_KEY
 
 health_listener_ready=0
 for _ in {1..120}; do
+  if [[ -f "$STOP_FILE" ]]; then
+    rm -f "$STOP_FILE"
+    info "Dashboard requested a clean agent shutdown"
+    exit 0
+  fi
   if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
     info "See tunnel diagnostics with: sudo tail -40 $TUNNEL_CLIENT_LOG"
     info "Supervisor status log: $TUNNEL_SUPERVISOR_LOG"
@@ -336,6 +341,11 @@ startup_timeout="${REMOTE_CODING_AGENT_STARTUP_TIMEOUT_SECONDS:-300}"
 tunnel_ready=0
 last_wait_notice=0
 for ((elapsed=0; elapsed<startup_timeout; elapsed++)); do
+  if [[ -f "$STOP_FILE" ]]; then
+    rm -f "$STOP_FILE"
+    info "Dashboard requested a clean agent shutdown"
+    exit 0
+  fi
   if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
     info "See tunnel diagnostics with: sudo tail -40 $TUNNEL_CLIENT_LOG"
     info "Supervisor status log: $TUNNEL_SUPERVISOR_LOG"
