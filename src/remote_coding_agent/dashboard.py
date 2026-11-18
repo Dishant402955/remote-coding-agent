@@ -10,6 +10,7 @@ import hmac
 import json
 import os
 import secrets
+import subprocess
 import threading
 import time
 import urllib.error
@@ -26,6 +27,9 @@ STATE_DIR = Path(os.getenv(
 )).expanduser()
 CONFIG_FILE = STATE_DIR / "dashboard.json"
 HISTORY_FILE = STATE_DIR / "command-history.jsonl"
+START_FILE = STATE_DIR / "start-requested"
+TUNNEL_USER = "remote-coding-agent-tunnel"
+TUNNEL_CREDENTIALS = "/var/lib/remote-coding-agent-tunnel/credentials.json"
 HOST = "127.0.0.1"
 PORT = int(os.getenv("REMOTE_CODING_AGENT_DASHBOARD_PORT", "3333"))
 MCP_PORT = int(os.getenv("REMOTE_CODING_AGENT_PORT", "8000"))
@@ -88,6 +92,53 @@ def _save_config(data: dict[str, Any]) -> None:
         os.fsync(handle.fileno())
     os.replace(temp, CONFIG_FILE)
     os.chmod(CONFIG_FILE, 0o600)
+
+
+def _store_tunnel_credentials(tunnel_id: str, api_key: str) -> None:
+    """Write credentials as the isolated tunnel account, never into the agent user's files."""
+    payload = json.dumps({"tunnel_id": tunnel_id, "api_key": api_key})
+    command = "umask 077; cat > " + TUNNEL_CREDENTIALS
+    try:
+        result = subprocess.run(
+            [
+                "sudo", "-n", "-u", TUNNEL_USER, "--",
+                "/bin/sh", "-c", command,
+            ],
+            input=payload,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("Could not securely store tunnel credentials") from exc
+    if result.returncode != 0:
+        raise RuntimeError(
+            "Could not securely store tunnel credentials; authorize sudo and retry"
+        )
+
+
+def _read_tunnel_credentials() -> dict[str, str]:
+    """Read the isolated service account's credentials through sudo."""
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "-u", TUNNEL_USER, "--", "/usr/bin/cat", TUNNEL_CREDENTIALS],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("Tunnel credentials are not available") from exc
+    if result.returncode != 0:
+        raise RuntimeError("Tunnel credentials are not configured")
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Tunnel credentials file is invalid") from exc
+    if not value.get("tunnel_id") or not value.get("api_key"):
+        raise RuntimeError("Tunnel credentials are incomplete")
+    return {"tunnel_id": str(value["tunnel_id"]), "api_key": str(value["api_key"])}
 
 
 def _password_hash(password: str, salt: bytes | None = None) -> tuple[str, str]:
@@ -216,7 +267,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/auth-state":
             config = _load_config()
-            self._json(200, {"configured": bool(config.get("password_hash") and config.get("api_key")), "authenticated": self._session()})
+            self._json(200, {"configured": bool(config.get("password_hash") and config.get("tunnel_id")), "authenticated": self._session()})
             return
         if not self._session():
             self._json(401, {"error": "Unauthorized"})
@@ -247,8 +298,18 @@ class Handler(BaseHTTPRequestHandler):
             if len(password) < 12 or not tunnel_id.strip() or len(api_key) < 16:
                 self._json(400, {"error": "Use a 12+ character password and provide a valid tunnel ID and runtime API key"})
                 return
+            try:
+                _store_tunnel_credentials(tunnel_id.strip(), api_key.strip())
+            except RuntimeError as exc:
+                self._json(503, {"error": str(exc)})
+                return
             salt, digest = _password_hash(password)
-            _save_config({"password_salt": salt, "password_hash": digest, "tunnel_id": tunnel_id.strip(), "api_key": api_key.strip(), "updated_at": _now()})
+            _save_config({
+                "password_salt": salt,
+                "password_hash": digest,
+                "tunnel_id": tunnel_id.strip(),
+                "updated_at": _now(),
+            })
             self._json(200, {"ok": True}, {"Set-Cookie": self._cookie()})
             return
         if path == "/api/login":
@@ -259,6 +320,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self._session():
             self._json(401, {"error": "Unauthorized"})
+            return
+        if path == "/api/start":
+            try:
+                _read_tunnel_credentials()
+            except RuntimeError as exc:
+                self._json(503, {"error": str(exc)})
+                return
+            STATE_DIR.mkdir(parents=True, exist_ok=True)
+            START_FILE.write_text(_now(), encoding="utf-8")
+            os.chmod(START_FILE, 0o600)
+            self._json(200, {"ok": True})
             return
         if path == "/api/logout":
             cookie = self.headers.get("Cookie", "")
@@ -277,7 +349,12 @@ class Handler(BaseHTTPRequestHandler):
             if not tunnel_id or len(api_key) < 16 or (new_password and len(new_password) < 12):
                 self._json(400, {"error": "Tunnel ID is required; API key must be valid; new password needs 12+ characters"})
                 return
-            updated = dict(config, tunnel_id=tunnel_id, api_key=api_key, updated_at=_now())
+            try:
+                _store_tunnel_credentials(tunnel_id, api_key)
+            except RuntimeError as exc:
+                self._json(503, {"error": str(exc)})
+                return
+            updated = dict(config, tunnel_id=tunnel_id, updated_at=_now())
             if new_password:
                 salt, digest = _password_hash(new_password)
                 updated.update(password_salt=salt, password_hash=digest)
@@ -295,30 +372,29 @@ def _serve() -> None:
     server.serve_forever(poll_interval=0.5)
 
 
-def _wait_for_config(timeout: int) -> None:
+def _wait_for_start(timeout: int) -> None:
     deadline = time.monotonic() + timeout
+    START_FILE.unlink(missing_ok=True)
     while time.monotonic() < deadline:
-        config = _load_config()
-        if config.get("password_hash") and config.get("tunnel_id") and config.get("api_key"):
+        if START_FILE.exists():
+            START_FILE.unlink(missing_ok=True)
             return
-        time.sleep(1)
-    raise SystemExit("Dashboard setup timed out before credentials were saved.")
+        time.sleep(0.5)
+    raise SystemExit("Dashboard start request timed out.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--wait-for-config", action="store_true")
+    parser.add_argument("--wait-for-start", action="store_true")
     parser.add_argument("--timeout-seconds", type=int, default=3600)
     parser.add_argument("--read-credentials", action="store_true")
     args = parser.parse_args()
     if args.read_credentials:
-        config = _load_config()
-        if not config.get("tunnel_id") or not config.get("api_key"):
-            raise SystemExit("Dashboard credentials are not configured.")
-        print(config["tunnel_id"])
-        print(config["api_key"])
-    elif args.wait_for_config:
-        _wait_for_config(args.timeout_seconds)
+        credentials = _read_tunnel_credentials()
+        print(credentials["tunnel_id"])
+        print(credentials["api_key"])
+    elif args.wait_for_start:
+        _wait_for_start(args.timeout_seconds)
     else:
         _serve()
 
