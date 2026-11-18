@@ -159,6 +159,7 @@ mkdir -p "$WORKSPACE" "$STATE_DIR"
 chmod 700 "$WORKSPACE" "$STATE_DIR"
 : > "$DASHBOARD_LOG"
 chmod 600 "$DASHBOARD_LOG"
+rm -f "$STATE_DIR/start-requested"
 env REMOTE_CODING_AGENT_STATE_DIR="$STATE_DIR" \
   REMOTE_CODING_AGENT_DASHBOARD_PORT="$DASHBOARD_PORT" \
   REMOTE_CODING_AGENT_PORT="$PORT" \
@@ -178,11 +179,11 @@ for _ in {1..80}; do
   sleep 0.25
 done
 [[ "$dashboard_ready" == "1" ]] || die "Dashboard did not become ready within 20 seconds."
-status STARTING "waiting for secure dashboard setup"
+status STARTING "waiting for dashboard authentication and start request"
 printf 'Open the local dashboard: http://127.0.0.1:%s\n' "$DASHBOARD_PORT"
-printf 'Create a dashboard password and enter your existing Tunnel ID + Runtime API Key.\n'
-"$PYTHON" -m remote_coding_agent.dashboard --wait-for-config \
-  --timeout-seconds "${REMOTE_CODING_AGENT_DASHBOARD_SETUP_TIMEOUT_SECONDS:-3600}" || die "Dashboard setup was not completed."
+printf 'Sign in or create your password, configure the tunnel credentials, then click Start agent.\n'
+"$PYTHON" -m remote_coding_agent.dashboard --wait-for-start \
+  --timeout-seconds "${REMOTE_CODING_AGENT_DASHBOARD_SETUP_TIMEOUT_SECONDS:-3600}" || die "Dashboard start request timed out."
 mapfile -t CREDENTIALS < <("$PYTHON" -m remote_coding_agent.dashboard --read-credentials) || die "Could not read dashboard credentials."
 CONTROL_PLANE_TUNNEL_ID="${CREDENTIALS[0]:-}"
 CONTROL_PLANE_API_KEY="${CREDENTIALS[1]:-}"
