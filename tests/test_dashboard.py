@@ -179,7 +179,7 @@ def test_session_history_merges_lifecycle_events(tmp_path, monkeypatch) -> None:
     history_file = tmp_path / "session-history.jsonl"
     monkeypatch.setattr(dashboard, "SESSION_HISTORY_FILE", history_file)
     history_file.write_text(
-        "\\n".join(
+        "\n".join(
             [
                 json.dumps({
                     "session_id": "session-1",
@@ -211,3 +211,18 @@ def test_session_history_merges_lifecycle_events(tmp_path, monkeypatch) -> None:
     assert result[1]["session_id"] == "session-1"
     assert result[1]["status"] == "stopped"
     assert result[1]["updated_at"] == "2026-11-18T10:00:00Z"
+
+
+def test_wait_for_start_exits_when_dashboard_stop_is_requested(tmp_path, monkeypatch) -> None:
+    stop_file = tmp_path / "stop-requested"
+    monkeypatch.setattr(dashboard, "STOP_FILE", stop_file)
+    stop_file.write_text("stop", encoding="utf-8")
+
+    try:
+        dashboard._wait_for_start(timeout=1)
+    except SystemExit as exc:
+        assert exc.code == 130
+    else:
+        raise AssertionError("stop request should interrupt dashboard start wait")
+
+    assert not stop_file.exists()
