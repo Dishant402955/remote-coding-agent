@@ -81,6 +81,7 @@ def test_credential_writer_uses_restricted_helper_and_stdin(monkeypatch) -> None
         dashboard.TUNNEL_USER,
         "--",
         dashboard.STORE_HELPER,
+        "write",
     ]
     assert captured["kwargs"]["input"] == (
         '{"tunnel_id": "tunnel-example", "api_key": "runtime-key-example-123456"}'
@@ -119,3 +120,109 @@ def test_status_reports_running_session_uptime(tmp_path, monkeypatch) -> None:
 
     assert result["session"]["status"] == "running"
     assert result["uptime_seconds"] > 0
+
+
+def test_credential_reader_uses_restricted_helper_and_parses_json(monkeypatch) -> None:
+    captured = {}
+
+    class Result:
+        returncode = 0
+        stdout = json.dumps({
+            "tunnel_id": "tunnel-example",
+            "api_key": "runtime-key-example-123456",
+        })
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return Result()
+
+    monkeypatch.setattr(dashboard.subprocess, "run", fake_run)
+    result = dashboard._read_tunnel_credentials()
+
+    assert result == {
+        "tunnel_id": "tunnel-example",
+        "api_key": "runtime-key-example-123456",
+    }
+    assert captured["command"] == [
+        "sudo",
+        "-n",
+        "-u",
+        dashboard.TUNNEL_USER,
+        "--",
+        dashboard.STORE_HELPER,
+        "read",
+    ]
+    assert captured["kwargs"]["timeout"] == 5
+
+
+def test_credential_reader_rejects_non_object_payload(monkeypatch) -> None:
+    class Result:
+        returncode = 0
+        stdout = "[]"
+
+    monkeypatch.setattr(
+        dashboard.subprocess,
+        "run",
+        lambda *_args, **_kwargs: Result(),
+    )
+
+    try:
+        dashboard._read_tunnel_credentials()
+    except RuntimeError as exc:
+        assert "invalid" in str(exc).lower()
+    else:
+        raise AssertionError("non-object credential payload must be rejected")
+
+
+def test_session_history_merges_lifecycle_events(tmp_path, monkeypatch) -> None:
+    history_file = tmp_path / "session-history.jsonl"
+    monkeypatch.setattr(dashboard, "SESSION_HISTORY_FILE", history_file)
+    history_file.write_text(
+        "\n".join(
+            [
+                json.dumps({
+                    "session_id": "session-1",
+                    "status": "starting",
+                    "started_at": "2026-11-18T09:00:00Z",
+                    "updated_at": "2026-11-18T09:00:00Z",
+                }),
+                json.dumps({
+                    "session_id": "session-1",
+                    "status": "stopped",
+                    "started_at": "2026-11-18T09:00:00Z",
+                    "updated_at": "2026-11-18T10:00:00Z",
+                }),
+                json.dumps({
+                    "session_id": "session-2",
+                    "status": "running",
+                    "started_at": "2026-11-18T11:00:00Z",
+                    "updated_at": "2026-11-18T11:00:00Z",
+                }),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = dashboard._session_history()
+
+    assert len(result) == 2
+    assert result[0]["session_id"] == "session-2"
+    assert result[1]["session_id"] == "session-1"
+    assert result[1]["status"] == "stopped"
+    assert result[1]["updated_at"] == "2026-11-18T10:00:00Z"
+
+
+def test_wait_for_start_exits_when_dashboard_stop_is_requested(tmp_path, monkeypatch) -> None:
+    stop_file = tmp_path / "stop-requested"
+    monkeypatch.setattr(dashboard, "STOP_FILE", stop_file)
+    stop_file.write_text("stop", encoding="utf-8")
+
+    try:
+        dashboard._wait_for_start(timeout=1)
+    except SystemExit as exc:
+        assert exc.code == 130
+    else:
+        raise AssertionError("stop request should interrupt dashboard start wait")
+
+    assert not stop_file.exists()
