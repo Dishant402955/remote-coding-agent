@@ -57,7 +57,7 @@ Run:
 ./scripts/up.sh
 ```
 
-The script first asks sudo to authorize the dedicated tunnel account, then starts a dependency-free dashboard at **http://127.0.0.1:3333**. Open it in a browser on the Ubuntu machine. On first use, create a dashboard password and enter the existing Tunnel ID and Runtime API Key. The launcher waits for this setup before starting the MCP server and tunnel. Later starts load the saved credentials automatically. Use the dashboard's Settings page to change the password, Tunnel ID, or API key; credential changes apply after restarting the agent.
+The script first asks sudo to authorize the dedicated tunnel account, then starts a dependency-free dashboard at **http://127.0.0.1:3333**. Open it in a browser on the Ubuntu machine. On first use, create a dashboard password and enter the existing Tunnel ID and Runtime API Key, then click **Start agent**. The launcher waits for that explicit action before starting the MCP server and tunnel. Later starts require a dashboard login and another **Start agent** click; saved credentials are loaded automatically. Use the dashboard's Settings page to change the password, Tunnel ID, or API key; credential changes apply after restarting the agent.
 
 The dashboard is intentionally bound to loopback only at `127.0.0.1:3333`. For a remote Ubuntu host, use SSH local port forwarding (for example, `ssh -L 3333:127.0.0.1:3333 user@host`) and then browse to `http://127.0.0.1:3333` on your local machine. Do not bind the dashboard to a public interface. The overview shows whether the agent session is running, its uptime, MCP/tunnel health, and the most recent 500 commands. Each command entry includes a local timestamp, command preview, working directory, duration, and exit status.
 
