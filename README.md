@@ -96,7 +96,7 @@ uv sync --locked --extra dev
 uv run ruff check .
 uv run pytest
 python3 -m json.tool notebooks/remote_coding_agent_colab.ipynb >/dev/null
-bash -n scripts/setup-ubuntu.sh scripts/up.sh scripts/server-supervisor.sh scripts/tunnel-client-supervisor.sh bootstrap/setup-remote-coding-agent.sh
+bash -n scripts/setup-ubuntu.sh scripts/up.sh scripts/server-supervisor.sh scripts/tunnel-client-supervisor.sh scripts/store-tunnel-credentials.sh bootstrap/setup-remote-coding-agent.sh
 uv run python scripts/soak-test.py --help
 ```
 
