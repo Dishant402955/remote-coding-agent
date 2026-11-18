@@ -194,6 +194,17 @@ sudo install -o root -g root -m 644 "$STAGING_DIR/tunnel-client-v0.0.19-linux-am
 sudo install -o root -g root -m 644 "$STAGING_DIR/tunnel-client-v0.0.19-linux-amd64.spdx.json" "$SYSTEM_STAGING_DIR/tunnel-client-v0.0.19-linux-amd64.spdx.json"
 sudo -u "$TUNNEL_USER" -- "$SYSTEM_STAGING_DIR/tunnel-client" --version >/dev/null
 sudo install -o root -g root -m 755 "$ROOT/scripts/tunnel-client-supervisor.sh" "$SYSTEM_BASE/tunnel-client-supervisor.sh"
+STORE_CREDENTIALS_HELPER="$SYSTEM_BASE/store-tunnel-credentials.sh"
+sudo install -o root -g root -m 755 "$ROOT/scripts/store-tunnel-credentials.sh" "$STORE_CREDENTIALS_HELPER"
+
+# Permit only the dedicated tunnel account to receive credential updates.
+SUDOERS_FILE="/etc/sudoers.d/remote-coding-agent-dashboard-$UID"
+SUDOERS_TEMP="$(mktemp)"
+printf '%s ALL=(%s) NOPASSWD: %s\\n' "$(id -un)" "$TUNNEL_USER" "$STORE_CREDENTIALS_HELPER" > "$SUDOERS_TEMP"
+sudo visudo -cf "$SUDOERS_TEMP" >/dev/null
+sudo install -o root -g root -m 440 "$SUDOERS_TEMP" "$SUDOERS_FILE"
+rm -f "$SUDOERS_TEMP"
+sudo visudo -cf "$SUDOERS_FILE" >/dev/null
 if [[ -d "$TUNNEL_INSTALL_DIR" ]]; then
   sudo mv -- "$TUNNEL_INSTALL_DIR" "$SYSTEM_BACKUP_DIR"
 fi
