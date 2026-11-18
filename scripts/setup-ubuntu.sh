@@ -200,7 +200,7 @@ sudo install -o root -g root -m 755 "$ROOT/scripts/store-tunnel-credentials.sh" 
 # Permit only the dedicated tunnel account to receive credential updates.
 SUDOERS_FILE="/etc/sudoers.d/remote-coding-agent-dashboard-$UID"
 SUDOERS_TEMP="$(mktemp)"
-printf '%s ALL=(%s) NOPASSWD: %s\\n' "$(id -un)" "$TUNNEL_USER" "$STORE_CREDENTIALS_HELPER" > "$SUDOERS_TEMP"
+printf '%s ALL=(%s) NOPASSWD: %s\n' "$(id -un)" "$TUNNEL_USER" "$STORE_CREDENTIALS_HELPER" > "$SUDOERS_TEMP"
 sudo visudo -cf "$SUDOERS_TEMP" >/dev/null
 sudo install -o root -g root -m 440 "$SUDOERS_TEMP" "$SUDOERS_FILE"
 rm -f "$SUDOERS_TEMP"
