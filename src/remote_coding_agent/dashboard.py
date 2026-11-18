@@ -385,6 +385,12 @@ class Handler(BaseHTTPRequestHandler):
             if session.get("status") not in ("starting", "running"):
                 self._json(409, {"error": "Agent is not running"})
                 return
+            session["status"] = "stopping"
+            session["updated_at"] = _now()
+            temporary = SESSION_FILE.with_suffix(".tmp")
+            temporary.write_text(json.dumps(session), encoding="utf-8")
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, SESSION_FILE)
             STATE_DIR.mkdir(parents=True, exist_ok=True)
             STOP_FILE.write_text(_now(), encoding="utf-8")
             os.chmod(STOP_FILE, 0o600)
