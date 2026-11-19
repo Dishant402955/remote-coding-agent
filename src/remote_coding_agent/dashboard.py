@@ -156,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(b": keep-alive\n\n")
                     self.wfile.flush()
                     heartbeat = now
-                time.sleep(0.15)
+                time.sleep(0.05)
         except (BrokenPipeError, ConnectionResetError, OSError):
             return
 
