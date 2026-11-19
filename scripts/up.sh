@@ -81,51 +81,79 @@ write_session_state() {
 die() { printf '%s | STATUS: FAILED | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; exit 1; }
 port_is_open() { local port="$1"; (echo > "/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1; }
 
+# Every managed local service is started in its own session/process group. Stop the
+# whole group, not just its supervisor PID, so grandchildren cannot be orphaned.
 stop_process() {
-  local pid="${1:-}"
+  local pid="${1:-}" mode="${2:-pid}" process_state
   [[ -n "$pid" ]] || return 0
-  if kill -0 "$pid" 2>/dev/null; then
+  if [[ "$mode" == "supervised" ]]; then
+    # Let the supervisor run its own EXIT handler first. It knows the child
+    # process-group ID and can reap it without being killed mid-cleanup.
+    kill -TERM "$pid" 2>/dev/null || true
+    for _ in {1..80}; do
+      process_state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+      process_state="${process_state//[[:space:]]/}"
+      [[ -n "$process_state" && "$process_state" != Z* ]] || break
+      sleep 0.1
+    done
+    process_state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+    process_state="${process_state//[[:space:]]/}"
+    if [[ -n "$process_state" && "$process_state" != Z* ]]; then
+      kill -KILL -- "-$pid" 2>/dev/null || true
+    fi
+  elif [[ "$mode" == "group" ]]; then
+    kill -TERM -- "-$pid" 2>/dev/null || true
+    for _ in {1..50}; do
+      process_state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+      process_state="${process_state//[[:space:]]/}"
+      [[ -n "$process_state" && "$process_state" != Z* ]] || break
+      sleep 0.1
+    done
+    process_state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+    process_state="${process_state//[[:space:]]/}"
+    if [[ -n "$process_state" && "$process_state" != Z* ]]; then
+      kill -KILL -- "-$pid" 2>/dev/null || true
+    fi
+  else
     kill -TERM "$pid" 2>/dev/null || true
     for _ in {1..50}; do
       kill -0 "$pid" 2>/dev/null || break
       sleep 0.1
     done
     kill -KILL "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
   fi
+  wait "$pid" 2>/dev/null || true
 }
 
 cleanup() {
   local exit_status=$?
+  local cleanup_complete=1
   trap - EXIT INT TERM HUP
+  set +e
   status STOPPING "shutting down managed processes"
-  cleanup_complete=1
 
   if [[ -n "$TUNNEL_PID" ]]; then
     if sudo -n "$STOP_TUNNEL_HELPER"; then
-      stop_process "$TUNNEL_PID"
+      info "Tunnel service-account process tree stopped"
     else
       printf 'STATUS: WARNING | Could not stop tunnel service account %s with the restricted cleanup helper.\n' "$TUNNEL_USER" >&2
       cleanup_complete=0
     fi
+    stop_process "$TUNNEL_PID"
   fi
 
-  stop_process "$SERVER_PID"
-  stop_process "$DASHBOARD_PID"
+  stop_process "$SERVER_PID" supervised
+  stop_process "$DASHBOARD_PID" group
   write_session_state "stopped"
   unset CONTROL_PLANE_API_KEY CONTROL_PLANE_TUNNEL_ID
   sudo -K 2>/dev/null || true
   if ((cleanup_complete)); then
-    status STOPPED "server and tunnel process trees stopped (exit=$exit_status)"
+    status STOPPED "managed process trees stopped (exit=$exit_status)"
   else
-    status STOPPED "server stopped; tunnel cleanup still needs sudo for $TUNNEL_USER"
+    status STOPPED "local services stopped; tunnel service-account cleanup failed"
   fi
   exit "$exit_status"
 }
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-trap 'exit 129' HUP
 
 [[ -t 0 && -t 1 ]] || die "Run this script in an interactive terminal (tmux is recommended)."
 command -v flock >/dev/null 2>&1 || die "flock is missing. Install util-linux and retry."
@@ -134,6 +162,10 @@ mkdir -p "$LOCK_DIR"
 chmod 700 "$LOCK_DIR"
 exec 9>"$LOCK_DIR/up.lock"
 flock -n 9 || die "Another Remote Coding Agent launcher is already running for this user."
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 [[ -x "$SERVER" && -x "$PYTHON" ]] || die "Python environment missing. Run scripts/setup-ubuntu.sh first."
 [[ -x "$SERVER_SUPERVISOR" ]] || die "Server supervisor missing or not executable."
@@ -184,10 +216,10 @@ SESSION_ID="$(date -u '+%Y%m%dT%H%M%SZ')-${BASHPID}"
 write_session_state "starting"
 : > "$DASHBOARD_LOG"
 chmod 600 "$DASHBOARD_LOG"
-env REMOTE_CODING_AGENT_STATE_DIR="$STATE_DIR" \
+setsid env REMOTE_CODING_AGENT_STATE_DIR="$STATE_DIR" \
   REMOTE_CODING_AGENT_LIVE_LOG_FILE="$LIVE_LOG" \
   REMOTE_CODING_AGENT_DASHBOARD_PORT="$DASHBOARD_PORT" \
-  "$PYTHON" -m remote_coding_agent.dashboard >>"$DASHBOARD_LOG" 2>&1 &
+  "$PYTHON" -m remote_coding_agent.dashboard >>"$DASHBOARD_LOG" 2>&1 9>&- &
 DASHBOARD_PID=$!
 dashboard_ready=0
 for _ in {1..80}; do
@@ -229,7 +261,7 @@ env -i \
   REMOTE_CODING_AGENT_MAX_CONCURRENT_COMMANDS="${REMOTE_CODING_AGENT_MAX_CONCURRENT_COMMANDS:-4}" \
   REMOTE_CODING_AGENT_CHILD_LOG_FILE="$SERVER_CHILD_LOG" \
   REMOTE_CODING_AGENT_SUPERVISOR_HEALTH_URL="http://127.0.0.1:${PORT}/readyz" \
-  setsid "$SERVER_SUPERVISOR" "$SERVER_SUPERVISOR_LOG" "$SERVER" &
+  setsid "$SERVER_SUPERVISOR" "$SERVER_SUPERVISOR_LOG" "$SERVER" 9>&- &
 SERVER_PID=$!
 
 server_ready=0
@@ -317,7 +349,7 @@ run_tunnel_client_as_service_user() {
 status STARTING "connecting Secure MCP Tunnel (maximum MCP connection TTL: 24h)"
 sudo install -o "$TUNNEL_USER" -g "$TUNNEL_USER" -m 600 /dev/null "$TUNNEL_CLIENT_LOG"
 sudo install -o "$TUNNEL_USER" -g "$TUNNEL_USER" -m 600 /dev/null "$TUNNEL_SUPERVISOR_LOG"
-run_tunnel_client_as_service_user &
+run_tunnel_client_as_service_user 9>&- &
 TUNNEL_PID=$!
 CONTROL_PLANE_API_KEY=''
 unset CONTROL_PLANE_API_KEY

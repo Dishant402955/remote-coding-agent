@@ -10,7 +10,9 @@ def test_dashboard_is_a_command_history_viewer() -> None:
     assert "new EventSource('/command-events')" in dashboard.PAGE
     assert "function showDetails" in dashboard.PAGE
     assert "Standard output" in dashboard.PAGE
-    assert "--canvas:#f5f7fb" in dashboard.PAGE
+    assert "color-scheme:dark" in dashboard.PAGE
+    assert "--canvas:#0d1117" in dashboard.PAGE
+    assert "--surface:#171f2c" in dashboard.PAGE
 
 
 def test_history_events_merge_updates_and_filter_before_control_plane(
