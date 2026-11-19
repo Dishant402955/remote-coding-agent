@@ -175,7 +175,8 @@ printf "\n"
 mkdir -p "$WORKSPACE" "$STATE_DIR"
 chmod 700 "$WORKSPACE" "$STATE_DIR"
 : > "$LIVE_LOG"
-chmod 600 "$LIVE_LOG"
+: > "$CONTROL_PLANE_CONNECTED_FILE"
+chmod 600 "$LIVE_LOG" "$CONTROL_PLANE_CONNECTED_FILE"
 # Mirror every launcher/service line to the terminal and the live dashboard log.
 exec > >(tee -a "$LIVE_LOG") 2>&1
 SESSION_STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
