@@ -61,6 +61,78 @@ def test_server_supervisor_restarts_crashed_child(tmp_path: Path) -> None:
     assert "STATUS: STOPPED" in log_text
 
 
+@pytest.mark.skipif(
+    os.name != "posix" or not Path("/proc/self/fd").exists(),
+    reason="Linux process descriptors and process groups are required",
+)
+def test_server_supervisor_closes_inherited_lock_fd_and_reaps_process_group(
+    tmp_path: Path,
+) -> None:
+    lock_file = tmp_path / "up.lock"
+    child_pid_file = tmp_path / "grandchild.pid"
+    fd_marker = tmp_path / "lock-fd-inherited"
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import os,pathlib,subprocess,time\\n"
+        f"pathlib.Path({str(fd_marker)!r}).write_text(str(os.path.exists('/proc/self/fd/9')))\\n"
+        f"p=pathlib.Path({str(child_pid_file)!r})\\n"
+        "p.write_text(str(subprocess.Popen(['sleep','60']).pid))\\n"
+        "time.sleep(60)\\n",
+        encoding="utf-8",
+    )
+    log = tmp_path / "server.log"
+    clean_env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("REMOTE_CODING_AGENT_")
+    }
+    clean_env["REMOTE_CODING_AGENT_CHILD_LOG_FILE"] = str(tmp_path / "server-child.log")
+    process = subprocess.Popen(
+        [
+            "bash",
+            "-c",
+            'exec 9>"$1"; shift; exec "$@"',
+            "_",
+            str(lock_file),
+            "bash",
+            str(SERVER),
+            str(log),
+            sys.executable,
+            str(child),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=clean_env,
+        start_new_session=True,
+    )
+    try:
+        wait_for(lambda: fd_marker.exists() and child_pid_file.exists())
+        assert fd_marker.read_text() == "False"
+        grandchild_pid = int(child_pid_file.read_text())
+        process.terminate()
+        process.wait(timeout=8)
+
+        def child_is_gone() -> bool:
+            try:
+                os.kill(grandchild_pid, 0)
+            except ProcessLookupError:
+                return True
+            status_path = Path(f"/proc/{grandchild_pid}/stat")
+            if status_path.exists():
+                return status_path.read_text().split()[2] == "Z"
+            return False
+
+        wait_for(child_is_gone, timeout=4.0)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=8)
+    status_log = log.read_text()
+    assert "STATUS: STOPPING" in status_log
+    assert "STATUS: STOPPED" in status_log
+
+
 @pytest.mark.skipif(os.name != "posix", reason="process-group supervision is POSIX-specific")
 def test_tunnel_supervisor_restarts_with_24h_ttl_and_hides_key(tmp_path: Path) -> None:
     calls = tmp_path / "calls"
