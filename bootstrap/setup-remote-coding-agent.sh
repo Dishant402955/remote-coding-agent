@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Idempotently install/update Remote Coding Agent on native Ubuntu and launch it in tmux.
+# Idempotently install/update Remote Coding Agent on native Ubuntu; leave launch to scripts/up.sh.
 set -Eeuo pipefail
 umask 077
 
@@ -8,6 +8,8 @@ PROJECT_PARENT="${REMOTE_CODING_AGENT_PROJECT_PARENT:-$HOME/projects}"
 PROJECT_DIR="${REMOTE_CODING_AGENT_PROJECT_DIR:-$PROJECT_PARENT/remote-coding-agent}"
 BRANCH="main"
 SESSION_NAME="${REMOTE_CODING_AGENT_TMUX_SESSION:-remote-agent}"
+TUNNEL_USER="remote-coding-agent-tunnel"
+CREDENTIAL_HELPER="/usr/local/lib/remote-coding-agent/store-tunnel-credentials.sh"
 
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -92,18 +94,21 @@ log "Installing/updating Python, dependencies, tunnel-client, and the isolated t
 bash "$PROJECT_DIR/scripts/setup-ubuntu.sh"
 
 command -v tmux >/dev/null 2>&1 || die "tmux is missing after setup-ubuntu.sh. Install it with: sudo apt-get install tmux"
-command -v systemd-inhibit >/dev/null 2>&1 || die "systemd-inhibit is missing. Install the systemd package and rerun this script."
 [[ -x "$PROJECT_DIR/scripts/up.sh" ]] || die "scripts/up.sh is not executable after setup."
+[[ -x "$CREDENTIAL_HELPER" ]] || die "Credential helper was not installed at $CREDENTIAL_HELPER."
 
-log "Setup completed. Starting the agent in tmux"
+log "Running a final credential-helper permission and filesystem preflight"
+if ! sudo -n -u "$TUNNEL_USER" -- "$CREDENTIAL_HELPER" check; then
+  die "Credential helper preflight failed after installation. The dashboard will not be launched. Rerun this setup and inspect the sudoers/ownership diagnostic above."
+fi
+
+log "Installation and credential-storage preflight completed successfully"
 printf 'Repository: %s\n' "$PROJECT_DIR"
 printf 'Branch: %s\n' "$(git -C "$PROJECT_DIR" branch --show-current)"
 printf 'Commit: %s\n' "$(git -C "$PROJECT_DIR" rev-parse --short HEAD)"
-printf '\nThe dashboard will be available at http://127.0.0.1:3333 once startup completes.\n'
-printf 'On first setup, create its password and enter the Tunnel ID and Runtime API Key in the dashboard.\n'
-printf 'The runtime key is stored under the dedicated tunnel account, not in this script.\n'
-printf 'Detach with Ctrl+B, then D. Reattach with: tmux attach -t %s\n' "$SESSION_NAME"
-printf 'Stop cleanly by reattaching and pressing Ctrl+C, or use Stop agent in the dashboard.\n\n'
-
-printf -v launch_command 'exec %q' "$PROJECT_DIR/scripts/up.sh"
-exec tmux new-session -s "$SESSION_NAME" -c "$PROJECT_DIR" "$launch_command"
+printf 'Credential helper: PASS (sudo execution and private directory write verified)\n'
+printf '\nNEXT STEP: start the agent manually from the repository directory:\n'
+printf '  cd %q\n' "$PROJECT_DIR"
+printf '  ./scripts/up.sh\n\n'
+printf 'Then open http://127.0.0.1:3333, create/sign in to the dashboard, and save your Tunnel ID and Runtime API Key.\n'
+printf 'This setup script does not start the agent or ask for your tunnel key.\n'
