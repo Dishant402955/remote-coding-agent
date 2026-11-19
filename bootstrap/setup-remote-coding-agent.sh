@@ -85,7 +85,6 @@ for relative_path in \
   scripts/up.sh \
   scripts/server-supervisor.sh \
   scripts/tunnel-client-supervisor.sh \
-  scripts/store-tunnel-credentials.sh \
   scripts/stop-tunnel-processes.sh; do
   [[ -f "$PROJECT_DIR/$relative_path" ]] || die "Updated repository is missing $relative_path."
 done
@@ -95,20 +94,15 @@ bash "$PROJECT_DIR/scripts/setup-ubuntu.sh"
 
 command -v tmux >/dev/null 2>&1 || die "tmux is missing after setup-ubuntu.sh. Install it with: sudo apt-get install tmux"
 [[ -x "$PROJECT_DIR/scripts/up.sh" ]] || die "scripts/up.sh is not executable after setup."
-[[ -x "$CREDENTIAL_HELPER" ]] || die "Credential helper was not installed at $CREDENTIAL_HELPER."
 
-log "Running a final credential-helper permission and filesystem preflight"
-if ! sudo -n -u "$TUNNEL_USER" -- "$CREDENTIAL_HELPER" check; then
-  die "Credential helper preflight failed after installation. The dashboard will not be launched. Rerun this setup and inspect the sudoers/ownership diagnostic above."
-fi
-
-log "Installation and credential-storage preflight completed successfully"
+log "Installation completed successfully"
 printf 'Repository: %s\n' "$PROJECT_DIR"
 printf 'Branch: %s\n' "$(git -C "$PROJECT_DIR" branch --show-current)"
 printf 'Commit: %s\n' "$(git -C "$PROJECT_DIR" rev-parse --short HEAD)"
-printf 'Credential helper: PASS (sudo execution and private directory write verified)\n'
+printf 'Credential input: terminal prompt at agent startup (not saved)\n'
 printf '\nNEXT STEP: start the agent manually from the repository directory:\n'
 printf '  cd %q\n' "$PROJECT_DIR"
 printf '  ./scripts/up.sh\n\n'
-printf 'Then open http://127.0.0.1:3333, create/sign in to the dashboard, and save your Tunnel ID and Runtime API Key.\n'
-printf 'This setup script does not start the agent or ask for your tunnel key.\n'
+printf 'The launcher will ask for your Tunnel ID and Runtime API Key in this terminal.\n'
+printf 'The dashboard at http://127.0.0.1:3333 displays the live log stream only.\n'
+printf 'This setup script does not start the agent.\n'
