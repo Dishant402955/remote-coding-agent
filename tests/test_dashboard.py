@@ -1,33 +1,42 @@
-"""Tests for the minimal real-time log dashboard."""
+"""Tests for the command-history dashboard."""
 
 from pathlib import Path
 
 from remote_coding_agent import dashboard
 
 
-def test_dashboard_is_a_black_and_white_live_log_viewer() -> None:
-    assert "background:#000" in dashboard.PAGE
-    assert "color:#fff" in dashboard.PAGE
-    assert "new EventSource('/events')" in dashboard.PAGE
-    assert "Start agent" not in dashboard.PAGE
-    assert "Runtime API Key" not in dashboard.PAGE
+def test_dashboard_is_a_command_history_viewer() -> None:
+    assert "Command history" in dashboard.PAGE
+    assert "new EventSource('/command-events')" in dashboard.PAGE
+    assert "function showDetails" in dashboard.PAGE
+    assert "Standard output" in dashboard.PAGE
+    assert "background:#f5f7fb" in dashboard.PAGE
 
 
-def test_log_stream_resumes_from_last_delivered_offset(tmp_path: Path) -> None:
-    log_file = tmp_path / "live.log"
-    log_file.write_text("first\nsecond\nthird\n", encoding="utf-8")
+def test_history_events_merge_updates_and_filter_before_control_plane(tmp_path: Path, monkeypatch) -> None:
+    history = tmp_path / "command-history.jsonl"
+    connected = tmp_path / "control-plane-connected"
+    connected.touch()
+    monkeypatch.setattr(dashboard, "HISTORY_FILE", history)
+    monkeypatch.setattr(dashboard, "CONNECTED_FILE", connected)
+    history.write_text(
+        '{"id":"old","started_at":"2000-01-01T00:00:00+00:00","status":"success"}\\n'
+        '{"id":"new","started_at":"2099-01-01T00:00:00+00:00","status":"running"}\\n'
+        '{"id":"new","finished_at":"2099-01-01T00:00:01+00:00","status":"success","stdout":"ok"}\\n',
+        encoding="utf-8",
+    )
+    events = dashboard._history_events()
+    assert len(events) == 1
+    assert events[0]["id"] == "new"
+    assert events[0]["stdout"] == "ok"
 
-    assert dashboard._initial_offset(log_file, "6") == 6
-    assert dashboard._initial_offset(log_file, "not-an-offset") == 0
 
-
-def test_new_log_stream_starts_at_a_line_boundary(tmp_path: Path) -> None:
-    log_file = tmp_path / "live.log"
-    log_file.write_text("x" * 70_000 + "\nlast line\n", encoding="utf-8")
-
-    offset = dashboard._initial_offset(log_file, None)
-
-    assert offset > 0
-    with log_file.open("rb") as stream:
-        stream.seek(offset)
-        assert stream.readline() == b"last line\n"
+def test_history_events_ignore_malformed_lines(tmp_path: Path, monkeypatch) -> None:
+    history = tmp_path / "command-history.jsonl"
+    connected = tmp_path / "control-plane-connected"
+    connected.touch()
+    monkeypatch.setattr(dashboard, "HISTORY_FILE", history)
+    monkeypatch.setattr(dashboard, "CONNECTED_FILE", connected)
+    history.write_text("not-json\\n", encoding="utf-8")
+    assert dashboard._history_events() == []
+"""
