@@ -7,7 +7,7 @@ There are exactly two supported deployment paths:
 1. **Google Colab:** run [`notebooks/remote_coding_agent_colab.ipynb`](notebooks/remote_coding_agent_colab.ipynb).
 2. **Native Ubuntu:** run [`scripts/setup-ubuntu.sh`](scripts/setup-ubuntu.sh) once, then [`scripts/up.sh`](scripts/up.sh) whenever you want to connect the machine.
 
-The native Ubuntu path includes an upgrade-safe bootstrap at [`bootstrap/setup-remote-coding-agent.sh`](bootstrap/setup-remote-coding-agent.sh). It clones the latest `main` on a new machine, or fast-forwards an existing clean `main` checkout, reruns the installer, and starts the supervised process in `tmux`. It refuses to overwrite local modifications, local-only commits, or an active agent session. The repository does not provide a Docker or Compose deployment.
+The native Ubuntu path includes an upgrade-safe bootstrap at [`bootstrap/setup-remote-coding-agent.sh`](bootstrap/setup-remote-coding-agent.sh). It clones the latest `main` on a new machine, or fast-forwards an existing clean `main` checkout, reruns the installer, and verifies the dashboard's credential-helper sudo path before finishing. It does not start the agent; you launch `scripts/up.sh` manually. It refuses to overwrite local modifications, local-only commits, or an active agent session. The repository does not provide a Docker or Compose deployment.
 
 ## Native Ubuntu quick start
 
@@ -45,7 +45,7 @@ chmod +x "$HOME/projects/setup-remote-coding-agent.sh"
 "$HOME/projects/setup-remote-coding-agent.sh"
 ```
 
-The bootstrap updates an existing clean checkout at `~/projects/remote-coding-agent` or clones it if absent. It keeps dashboard state and tunnel credentials in their existing system locations. It will not overwrite local modifications or local-only commits, switch branches, or update files while the `remote-agent` tmux session is active. Stop the running agent cleanly before updating. To use a different checkout path, set `REMOTE_CODING_AGENT_PROJECT_DIR` before running the script.
+The bootstrap updates an existing clean checkout at `~/projects/remote-coding-agent` or clones it if absent. It reruns the Ubuntu installer and verifies that the dedicated tunnel account can execute the credential helper and write to its private directory. If that preflight fails, setup stops before the dashboard is started and prints the failure. It keeps dashboard state and tunnel credentials in their existing system locations. It will not overwrite local modifications or local-only commits, switch branches, or update files while the `remote-agent` tmux session is active. Stop the running agent cleanly before updating. To use a different checkout path, set `REMOTE_CODING_AGENT_PROJECT_DIR` before running the script. After setup succeeds, run `cd ~/projects/remote-coding-agent && ./scripts/up.sh`.
 
 **Migrating from the earlier single-user Ubuntu launcher:** stop its server and tunnel-client processes, revoke the runtime API key used by that version, and create a replacement key. The earlier launcher ran `tunnel-client` under the same Linux account as `run_command`, which allowed a same-UID command to inspect its key through `/proc`. The new setup uses a dedicated system account for the tunnel process.
 
