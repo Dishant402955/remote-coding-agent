@@ -30,6 +30,7 @@ PORT="$(printenv REMOTE_CODING_AGENT_PORT || printf '8000')"
 HEALTH_PORT="$(printenv REMOTE_CODING_AGENT_HEALTH_PORT || printf '18080')"
 DASHBOARD_PORT="$(printenv REMOTE_CODING_AGENT_DASHBOARD_PORT || printf '3333')"
 STATE_DIR="${REMOTE_CODING_AGENT_STATE_DIR:-$HOME/.local/state/remote-coding-agent}"
+LIVE_LOG="$STATE_DIR/live.log"
 DASHBOARD_LOG="/tmp/remote-coding-agent-dashboard.log"
 SESSION_FILE="$STATE_DIR/agent-session.json"
 SESSION_HISTORY_FILE="$STATE_DIR/session-history.jsonl"
@@ -162,18 +163,28 @@ if port_is_open "$PORT"; then die "MCP port $PORT is already in use. Stop the ex
 if port_is_open "$HEALTH_PORT"; then die "Tunnel health port $HEALTH_PORT is already in use."; fi
 if port_is_open "$DASHBOARD_PORT"; then die "Dashboard port $DASHBOARD_PORT is already in use."; fi
 
+printf "OpenAI Secure MCP Tunnel ID: "
+IFS= read -r CONTROL_PLANE_TUNNEL_ID
+[[ -n "$CONTROL_PLANE_TUNNEL_ID" ]] || die "Tunnel ID cannot be empty."
+printf "OpenAI Secure MCP Tunnel Runtime API Key: "
+IFS= read -r -s CONTROL_PLANE_API_KEY
+printf "\n"
+(( ${#CONTROL_PLANE_API_KEY} >= 16 )) || die "Runtime API key is missing or too short."
+
 mkdir -p "$WORKSPACE" "$STATE_DIR"
 chmod 700 "$WORKSPACE" "$STATE_DIR"
+: > "$LIVE_LOG"
+chmod 600 "$LIVE_LOG"
+# Mirror every launcher/service line to the terminal and the live dashboard log.
+exec > >(tee -a "$LIVE_LOG") 2>&1
 SESSION_STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 SESSION_ID="$(date -u '+%Y%m%dT%H%M%SZ')-${BASHPID}"
 write_session_state "starting"
-: > "$DASHBOARD_LOG"
+ : > "$DASHBOARD_LOG"
 chmod 600 "$DASHBOARD_LOG"
-rm -f "$STATE_DIR/start-requested" "$STOP_FILE"
 env REMOTE_CODING_AGENT_STATE_DIR="$STATE_DIR" \
+  REMOTE_CODING_AGENT_LIVE_LOG_FILE="$LIVE_LOG" \
   REMOTE_CODING_AGENT_DASHBOARD_PORT="$DASHBOARD_PORT" \
-  REMOTE_CODING_AGENT_PORT="$PORT" \
-  REMOTE_CODING_AGENT_HEALTH_PORT="$HEALTH_PORT" \
   "$PYTHON" -m remote_coding_agent.dashboard >>"$DASHBOARD_LOG" 2>&1 &
 DASHBOARD_PID=$!
 dashboard_ready=0
@@ -189,24 +200,9 @@ for _ in {1..80}; do
   sleep 0.25
 done
 [[ "$dashboard_ready" == "1" ]] || die "Dashboard did not become ready within 20 seconds."
-status STARTING "waiting for dashboard authentication and start request"
-printf 'Open the local dashboard: http://127.0.0.1:%s\n' "$DASHBOARD_PORT"
-printf 'Sign in or create your password, configure the tunnel credentials, then click Start agent.\n'
-if "$PYTHON" -m remote_coding_agent.dashboard --wait-for-start \
-  --timeout-seconds "${REMOTE_CODING_AGENT_DASHBOARD_SETUP_TIMEOUT_SECONDS:-3600}"; then
-  :
-else
-  wait_status=$?
-  [[ "$wait_status" == "130" ]] && exit 0
-  die "Dashboard start request timed out or failed."
-fi
-CREDENTIALS_OUTPUT="$( "$PYTHON" -m remote_coding_agent.dashboard --read-credentials )" || die "Could not read dashboard credentials."
-mapfile -t CREDENTIALS <<< "$CREDENTIALS_OUTPUT"
-unset CREDENTIALS_OUTPUT
-CONTROL_PLANE_TUNNEL_ID="${CREDENTIALS[0]:-}"
-CONTROL_PLANE_API_KEY="${CREDENTIALS[1]:-}"
-unset CREDENTIALS
-[[ -n "$CONTROL_PLANE_TUNNEL_ID" && -n "$CONTROL_PLANE_API_KEY" ]] || die "Dashboard credentials are incomplete."
+status STARTING "dashboard ready; credentials supplied in terminal"
+printf 'Live logs: http://127.0.0.1:%s (updates as each line is written)\n' "$DASHBOARD_PORT"
+printf 'Tunnel credentials remain in this terminal session and are not saved by the dashboard.\n'
 
 status STARTING "preparing MCP server"
 : > "$SERVER_SUPERVISOR_LOG"
