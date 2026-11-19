@@ -71,6 +71,14 @@ _REDACTION_PATTERNS = (
 )
 
 
+def _redact_sensitive_text(value: str) -> str:
+    """Redact common inline credentials before command/output history is persisted."""
+    redacted = value
+    for pattern in _REDACTION_PATTERNS:
+        redacted = pattern.sub(r"\\1[REDACTED]", redacted)
+    return redacted
+
+
 def _command_preview(command: str, limit: int = 240) -> str:
     """Return a short command preview with common credential forms redacted."""
     preview = command
@@ -241,7 +249,7 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
         _record_command({
             "id": invocation_id,
             "started_at": started_at,
-            "command": preview,
+            "command": _redact_sensitive_text(command) if isinstance(command, str) else preview,
             "cwd": requested_cwd,
             "timeout_seconds": timeout,
             "status": "running",
@@ -266,7 +274,7 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
                     if result.get("exit_code") == 0 and not result.get("timed_out")
                     else "failed"
                 ),
-                "timed_out": bool(result.get("timed_out")),
+                "timed_out": bool(result.get("timed_out")),\n                "stdout": _redact_sensitive_text(str(result.get("stdout", ""))),\n                "stderr": _redact_sensitive_text(str(result.get("stderr", ""))),\n                "output_truncated": bool(result.get("output_truncated")),\n                "command": _redact_sensitive_text(command) if isinstance(command, str) else preview,\n                "cwd": requested_cwd,\n                "timeout_seconds": timeout,
             })
             logger.info(
                 "TOOL END id=%s name=run_command exit_code=%s timed_out=%s "
