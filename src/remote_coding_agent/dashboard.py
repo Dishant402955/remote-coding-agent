@@ -125,7 +125,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_event(self, event: dict[str, object]) -> None:
         payload = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
-        self.wfile.write(f"data: {payload}\\n\\n".encode())
+        self.wfile.write(f"data: {payload}\n\n".encode())
         self.wfile.flush()
 
     def _stream_commands(self) -> None:
@@ -151,7 +151,7 @@ class Handler(BaseHTTPRequestHandler):
                     delivered = set(list(delivered)[-1500:])
                 now = time.monotonic()
                 if now - heartbeat >= 15:
-                    self.wfile.write(b": keep-alive\\n\\n")
+                    self.wfile.write(b": keep-alive\n\n")
                     self.wfile.flush()
                     heartbeat = now
                 time.sleep(0.15)
