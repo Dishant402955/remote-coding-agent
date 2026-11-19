@@ -41,4 +41,4 @@ def test_history_events_ignore_malformed_lines(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setattr(dashboard, "CONNECTED_FILE", connected)
     history.write_text("not-json\n", encoding="utf-8")
     assert dashboard._history_events() == []
-"""
+
