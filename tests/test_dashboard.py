@@ -20,9 +20,9 @@ def test_history_events_merge_updates_and_filter_before_control_plane(tmp_path: 
     monkeypatch.setattr(dashboard, "HISTORY_FILE", history)
     monkeypatch.setattr(dashboard, "CONNECTED_FILE", connected)
     history.write_text(
-        '{"id":"old","started_at":"2000-01-01T00:00:00+00:00","status":"success"}\\n'
-        '{"id":"new","started_at":"2099-01-01T00:00:00+00:00","status":"running"}\\n'
-        '{"id":"new","finished_at":"2099-01-01T00:00:01+00:00","status":"success","stdout":"ok"}\\n',
+        '{"id":"old","started_at":"2000-01-01T00:00:00+00:00","status":"success"}\n'
+        '{"id":"new","started_at":"2099-01-01T00:00:00+00:00","status":"running"}\n'
+        '{"id":"new","finished_at":"2099-01-01T00:00:01+00:00","status":"success","stdout":"ok"}\n',
         encoding="utf-8",
     )
     events = dashboard._history_events()
@@ -37,6 +37,6 @@ def test_history_events_ignore_malformed_lines(tmp_path: Path, monkeypatch) -> N
     connected.touch()
     monkeypatch.setattr(dashboard, "HISTORY_FILE", history)
     monkeypatch.setattr(dashboard, "CONNECTED_FILE", connected)
-    history.write_text("not-json\\n", encoding="utf-8")
+    history.write_text("not-json\n", encoding="utf-8")
     assert dashboard._history_events() == []
 """
