@@ -122,6 +122,26 @@ def test_status_reports_running_session_uptime(tmp_path, monkeypatch) -> None:
     assert result["uptime_seconds"] > 0
 
 
+def test_credential_writer_surfaces_helper_diagnostic(monkeypatch) -> None:
+    class Result:
+        returncode = 1
+        stdout = ""
+        stderr = "sudo: a password is required"
+
+    monkeypatch.setattr(
+        dashboard.subprocess,
+        "run",
+        lambda *_args, **_kwargs: Result(),
+    )
+
+    try:
+        dashboard._store_tunnel_credentials("tunnel-example", "runtime-key-example-123456")
+    except RuntimeError as exc:
+        assert "sudo: a password is required" in str(exc)
+    else:
+        raise AssertionError("credential helper diagnostics should be surfaced")
+
+
 def test_credential_reader_uses_restricted_helper_and_parses_json(monkeypatch) -> None:
     captured = {}
 
