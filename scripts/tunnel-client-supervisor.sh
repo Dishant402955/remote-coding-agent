@@ -109,7 +109,7 @@ trap 'exit 129' HUP
 
 rotate_client_log
 transition STARTING "checking tunnel-client installation"
-if ! "$TUNNEL_CLIENT" doctor --explain >> "$CLIENT_LOG" 2>&1; then
+if ! "$TUNNEL_CLIENT" doctor --explain 2>&1 | tee -a "$CLIENT_LOG"; then
   transition DEGRADED "preflight diagnostics reported a warning; attempting connection"
 fi
 backoff=2
@@ -119,7 +119,10 @@ while true; do
   health_failures=0
   transition STARTING "connecting (maximum connection TTL: $CONNECTION_MAX_TTL)"
   rotate_client_log
-  setsid "$TUNNEL_CLIENT" run "--mcp.connection-max-ttl=$CONNECTION_MAX_TTL" >> "$CLIENT_LOG" 2>&1 &
+  # Tee tunnel-client output to both its private log and the launcher's live log stream.
+  # The wrapper and its pipeline stay in one process group for reliable cleanup.
+  setsid bash -o pipefail -c '"$@" 2>&1 | tee -a "$REMOTE_CODING_AGENT_TUNNEL_CLIENT_LOG"' _ \
+    "$TUNNEL_CLIENT" run "--mcp.connection-max-ttl=$CONNECTION_MAX_TTL" &
   CHILD_PID=$!
 
   if [[ -z "$HEALTH_URL" ]]; then
