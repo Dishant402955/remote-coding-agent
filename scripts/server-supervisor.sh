@@ -3,6 +3,11 @@
 set -Eeuo pipefail
 umask 077
 
+# The launcher owns fd 9 for its single-instance flock. Supervisors and all
+# descendants must never inherit it, or they can keep the lock alive after the
+# launcher exits.
+exec 9>&-
+
 LOG_FILE="${1:?usage: server-supervisor.sh STATUS_LOG COMMAND [ARG...]}"
 shift
 (($# > 0)) || { printf 'A server command is required.\n' >&2; exit 2; }
@@ -87,8 +92,14 @@ while true; do
   health_failures=0
   transition STARTING "launching process"
   rotate_child_log
-  # Tee child output to both the attached terminal and its private log.
-  setsid "$@" > >(tee -a "$CHILD_LOG") 2>&1 &
+  # Keep the command and tee in one dedicated process group. Avoid process
+  # substitution here: its tee can outlive this supervisor, retain inherited
+  # descriptors, and keep the launcher lock open after Ctrl+C.
+  setsid bash -o pipefail -c '
+    log_file="$1"
+    shift
+    "$@" 2>&1 | tee -a "$log_file"
+  ' _ "$CHILD_LOG" "$@" &
   CHILD_PID=$!
 
   if [[ -z "$HEALTH_URL" ]]; then
