@@ -146,7 +146,7 @@ class Handler(BaseHTTPRequestHandler):
                         offset = stream.tell()
                         value = line.decode("utf-8", errors="replace").rstrip("\r\n")
                         payload = json.dumps(value, ensure_ascii=False)
-                        event = f"id: {offset}\ndata: {payload}\n\n".encode("utf-8")
+                        event = f"id: {offset}\ndata: {payload}\n\n".encode()
                         self.wfile.write(event)
                         self.wfile.flush()
                         heartbeat = time.monotonic()
