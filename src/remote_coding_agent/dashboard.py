@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 HOST = "127.0.0.1"
 PORT = int(os.getenv("REMOTE_CODING_AGENT_DASHBOARD_PORT", "3333"))
-STATE_DIR = Path(os.getenv("REMOTE_CODING_AGENT_STATE_DIR", str(Path.home() / ".local/state/remote-coding-agent"))).expanduser()
+STATE_DIR = Path(\n    os.getenv(\n        "REMOTE_CODING_AGENT_STATE_DIR",\n        str(Path.home() / ".local" / "state" / "remote-coding-agent"),\n    )\n).expanduser()
 HISTORY_FILE = STATE_DIR / "command-history.jsonl"
 CONNECTED_FILE = STATE_DIR / "control-plane-connected"
 
