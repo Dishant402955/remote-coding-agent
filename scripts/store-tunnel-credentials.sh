@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Read or atomically store tunnel credentials as the dedicated tunnel account.
+# Read, validate, or atomically store tunnel credentials as the dedicated tunnel account.
 set -Eeuo pipefail
 umask 077
 
@@ -8,6 +8,25 @@ TARGET="$TUNNEL_HOME/credentials.json"
 MODE="${1:-}"
 
 case "$MODE" in
+  check)
+    python3 - "$TUNNEL_HOME" <<'PY'
+import os
+import stat
+import sys
+import tempfile
+
+directory = sys.argv[1]
+os.makedirs(directory, mode=0o700, exist_ok=True)
+info = os.stat(directory)
+if info.st_uid != os.geteuid():
+    raise SystemExit("tunnel credential directory is not owned by the tunnel service account")
+if stat.S_IMODE(info.st_mode) & 0o077:
+    raise SystemExit("tunnel credential directory permissions are too broad")
+fd, path = tempfile.mkstemp(prefix=".credential-check.", dir=directory)
+os.close(fd)
+os.unlink(path)
+PY
+    ;;
   read)
     python3 - "$TARGET" <<'PY'
 import json
@@ -63,6 +82,9 @@ if not isinstance(api_key, str) or len(api_key.strip()) < 16:
 
 directory = os.path.dirname(target)
 os.makedirs(directory, mode=0o700, exist_ok=True)
+info = os.stat(directory)
+if info.st_uid != os.geteuid() or info.st_mode & 0o077:
+    raise SystemExit("tunnel credential directory ownership or permissions are unsafe")
 fd, temp_path = tempfile.mkstemp(prefix=".credentials.", dir=directory)
 try:
     os.fchmod(fd, 0o600)
@@ -82,7 +104,7 @@ finally:
 PY
     ;;
   *)
-    printf 'Usage: %s {read|write}\n' "$0" >&2
+    printf 'Usage: %s {check|read|write}\n' "$0" >&2
     exit 2
     ;;
 esac
