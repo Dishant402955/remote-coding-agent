@@ -7,7 +7,7 @@ There are exactly two supported deployment paths:
 1. **Google Colab:** run [`notebooks/remote_coding_agent_colab.ipynb`](notebooks/remote_coding_agent_colab.ipynb).
 2. **Native Ubuntu:** run [`scripts/setup-ubuntu.sh`](scripts/setup-ubuntu.sh) once, then [`scripts/up.sh`](scripts/up.sh) whenever you want to connect the machine.
 
-The native Ubuntu path includes a one-shot bootstrap at [`bootstrap/setup-remote-coding-agent.sh`](bootstrap/setup-remote-coding-agent.sh). It clones the latest `main`, installs the pinned runtime, and starts the supervised process in `tmux`. The repository does not provide a Docker or Compose deployment.
+The native Ubuntu path includes an upgrade-safe bootstrap at [`bootstrap/setup-remote-coding-agent.sh`](bootstrap/setup-remote-coding-agent.sh). It clones the latest `main` on a new machine, or fast-forwards an existing clean `main` checkout, reruns the installer, and starts the supervised process in `tmux`. It refuses to overwrite local modifications, local-only commits, or an active agent session. The repository does not provide a Docker or Compose deployment.
 
 ## Native Ubuntu quick start
 
@@ -35,17 +35,17 @@ tmux new-session -s remote-agent ./scripts/up.sh
 
 Detach with `Ctrl+B`, then `D`; reconnect with `tmux attach -t remote-agent`. Stop cleanly by reattaching and pressing `Ctrl+C`. You do not need to reinstall Python or the tunnel client after a reboot. The dashboard password hash and non-secret tunnel ID are stored in `~/.local/state/remote-coding-agent/dashboard.json` with owner-only permissions. The runtime API key is stored separately at `/var/lib/remote-coding-agent-tunnel/credentials.json`, owned by the dedicated tunnel account with mode `600`; it is not readable by the normal MCP command user. A fixed-purpose sudo helper permits credential updates without granting general passwordless sudo. The API key is plaintext at rest inside the tunnel account's private home, so use a trusted machine account and full-disk encryption. Credential changes in Settings take effect on the next agent restart. The sleep inhibitor cannot protect against a power cut, network outage, or manual shutdown. Keep using your existing ChatGPT connector and tunnel.
 
-For a clean machine setup, download and run the standalone bootstrap from outside the project directory:
+For a clean machine setup or an in-place update, download and run the standalone bootstrap:
 
 ```bash
-mkdir -p "$HOME/projects/[scripts] remote-coding-agent-setup"
+mkdir -p "$HOME/projects"
 curl -fsSL https://raw.githubusercontent.com/Dishant402955/remote-coding-agent/main/bootstrap/setup-remote-coding-agent.sh \
-  -o "$HOME/projects/[scripts] remote-coding-agent-setup/setup-remote-coding-agent.sh"
-chmod +x "$HOME/projects/[scripts] remote-coding-agent-setup/setup-remote-coding-agent.sh"
-"$HOME/projects/[scripts] remote-coding-agent-setup/setup-remote-coding-agent.sh"
+  -o "$HOME/projects/setup-remote-coding-agent.sh"
+chmod +x "$HOME/projects/setup-remote-coding-agent.sh"
+"$HOME/projects/setup-remote-coding-agent.sh"
 ```
 
-It refuses to overwrite an existing clone or attach to a stale `remote-agent` tmux session. Stop the old agent and remove/move the old project directory before running it.
+The bootstrap updates an existing clean checkout at `~/projects/remote-coding-agent` or clones it if absent. It keeps dashboard state and tunnel credentials in their existing system locations. It will not overwrite local modifications or local-only commits, switch branches, or update files while the `remote-agent` tmux session is active. Stop the running agent cleanly before updating. To use a different checkout path, set `REMOTE_CODING_AGENT_PROJECT_DIR` before running the script.
 
 **Migrating from the earlier single-user Ubuntu launcher:** stop its server and tunnel-client processes, revoke the runtime API key used by that version, and create a replacement key. The earlier launcher ran `tunnel-client` under the same Linux account as `run_command`, which allowed a same-UID command to inspect its key through `/proc`. The new setup uses a dedicated system account for the tunnel process.
 
