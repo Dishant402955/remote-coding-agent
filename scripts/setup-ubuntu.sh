@@ -203,13 +203,21 @@ sudo install -o root -g root -m 755 "$ROOT/scripts/stop-tunnel-processes.sh" "$S
 SUDOERS_FILE="/etc/sudoers.d/remote-coding-agent-dashboard-$UID"
 SUDOERS_STAGE="/etc/sudoers.d/.remote-coding-agent-dashboard-$UID.new"
 SUDOERS_TEMP="$(mktemp)"
-printf '%s ALL=(%s) NOPASSWD: %s read, %s write\n' "$(id -un)" "$TUNNEL_USER" "$STORE_CREDENTIALS_HELPER" "$STORE_CREDENTIALS_HELPER" > "$SUDOERS_TEMP"
+# The helper validates its own operation arguments. Omitting sudoers argument
+# restrictions avoids brittle exact-argument matching across sudo versions.
+printf '%s ALL=(%s) NOPASSWD: %s\n' "$(id -un)" "$TUNNEL_USER" "$STORE_CREDENTIALS_HELPER" > "$SUDOERS_TEMP"
 printf '%s ALL=(root) NOPASSWD: %s\n' "$(id -un)" "$STOP_TUNNEL_HELPER" >> "$SUDOERS_TEMP"
 sudo install -o root -g root -m 440 "$SUDOERS_TEMP" "$SUDOERS_STAGE"
 sudo visudo -cf "$SUDOERS_STAGE" >/dev/null
 sudo mv -f "$SUDOERS_STAGE" "$SUDOERS_FILE"
 rm -f "$SUDOERS_TEMP"
 sudo visudo -cf "$SUDOERS_FILE" >/dev/null
+
+log "Verifying the credential helper through the exact non-interactive sudo path used by the dashboard"
+if ! sudo -n -u "$TUNNEL_USER" -- "$STORE_CREDENTIALS_HELPER" check; then
+  die "Credential helper preflight failed. The dashboard will not be started. Inspect $SUDOERS_FILE and $TUNNEL_HOME ownership."
+fi
+
 if [[ -d "$TUNNEL_INSTALL_DIR" ]]; then
   sudo mv -- "$TUNNEL_INSTALL_DIR" "$SYSTEM_BACKUP_DIR"
 fi
