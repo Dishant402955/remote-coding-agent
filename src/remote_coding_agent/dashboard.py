@@ -6,6 +6,7 @@ import argparse
 import ctypes
 import json
 import os
+import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -153,7 +154,7 @@ class Handler(BaseHTTPRequestHandler):
                             self.wfile.write(b": keep-alive\n\n")
                             self.wfile.flush()
                             heartbeat = now
-                        time.sleep(0.05)
+                        time.sleep(0.02)
         except (BrokenPipeError, ConnectionResetError, OSError):
             return
 
@@ -162,7 +163,7 @@ def _serve() -> None:
     LIVE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     LIVE_LOG_FILE.touch(mode=0o600, exist_ok=True)
     os.chmod(LIVE_LOG_FILE, 0o600)
-    if sys_platform_linux():
+    if sys.platform.startswith("linux"):
         libc = ctypes.CDLL(None, use_errno=True)
         if libc.prctl(4, 0, 0, 0, 0) != 0:
             raise OSError("could not disable dashboard process inspection")
@@ -170,9 +171,6 @@ def _serve() -> None:
     server.daemon_threads = True
     server.serve_forever(poll_interval=0.1)
 
-
-def sys_platform_linux() -> bool:
-    return os.name == "posix" and Path("/proc/sys/kernel").exists()
 
 
 def main() -> None:
