@@ -194,29 +194,24 @@ sudo install -o root -g root -m 644 "$STAGING_DIR/tunnel-client-v0.0.19-linux-am
 sudo install -o root -g root -m 644 "$STAGING_DIR/tunnel-client-v0.0.19-linux-amd64.spdx.json" "$SYSTEM_STAGING_DIR/tunnel-client-v0.0.19-linux-amd64.spdx.json"
 sudo -u "$TUNNEL_USER" -- "$SYSTEM_STAGING_DIR/tunnel-client" --version >/dev/null
 sudo install -o root -g root -m 755 "$ROOT/scripts/tunnel-client-supervisor.sh" "$SYSTEM_BASE/tunnel-client-supervisor.sh"
-STORE_CREDENTIALS_HELPER="$SYSTEM_BASE/store-tunnel-credentials.sh"
-sudo install -o root -g root -m 755 "$ROOT/scripts/store-tunnel-credentials.sh" "$STORE_CREDENTIALS_HELPER"
 STOP_TUNNEL_HELPER="$SYSTEM_BASE/stop-tunnel-processes.sh"
 sudo install -o root -g root -m 755 "$ROOT/scripts/stop-tunnel-processes.sh" "$STOP_TUNNEL_HELPER"
 
-# Permit only fixed-purpose credential and tunnel-cleanup operations.
+# The dashboard is log-only now. Tunnel credentials are entered into scripts/up.sh
+# in the terminal and streamed to tunnel-client over stdin; no credential sudo rule
+# or persistent credential file is needed.
 SUDOERS_FILE="/etc/sudoers.d/remote-coding-agent-dashboard-$UID"
 SUDOERS_STAGE="/etc/sudoers.d/.remote-coding-agent-dashboard-$UID.new"
 SUDOERS_TEMP="$(mktemp)"
-# The helper validates its own operation arguments. Omitting sudoers argument
-# restrictions avoids brittle exact-argument matching across sudo versions.
-printf '%s ALL=(%s) NOPASSWD: %s\n' "$(id -un)" "$TUNNEL_USER" "$STORE_CREDENTIALS_HELPER" > "$SUDOERS_TEMP"
-printf '%s ALL=(root) NOPASSWD: %s\n' "$(id -un)" "$STOP_TUNNEL_HELPER" >> "$SUDOERS_TEMP"
+printf '%s ALL=(root) NOPASSWD: %s\n' "$(id -un)" "$STOP_TUNNEL_HELPER" > "$SUDOERS_TEMP"
 sudo install -o root -g root -m 440 "$SUDOERS_TEMP" "$SUDOERS_STAGE"
 sudo visudo -cf "$SUDOERS_STAGE" >/dev/null
 sudo mv -f "$SUDOERS_STAGE" "$SUDOERS_FILE"
 rm -f "$SUDOERS_TEMP"
 sudo visudo -cf "$SUDOERS_FILE" >/dev/null
 
-log "Verifying the credential helper through the exact non-interactive sudo path used by the dashboard"
-if ! sudo -n -u "$TUNNEL_USER" -- "$STORE_CREDENTIALS_HELPER" check; then
-  die "Credential helper preflight failed. The dashboard will not be started. Inspect $SUDOERS_FILE and $TUNNEL_HOME ownership."
-fi
+log "Removing legacy dashboard-stored tunnel credentials and helper"
+sudo rm -f "$SYSTEM_BASE/store-tunnel-credentials.sh" "$TUNNEL_HOME/credentials.json"
 
 if [[ -d "$TUNNEL_INSTALL_DIR" ]]; then
   sudo mv -- "$TUNNEL_INSTALL_DIR" "$SYSTEM_BACKUP_DIR"
@@ -240,4 +235,5 @@ printf 'uv: %s\n' "$(uv --version)"
 printf 'Tunnel client: %s\n' "$(sudo -u "$TUNNEL_USER" -- "$TUNNEL_INSTALL_DIR/tunnel-client" --version)"
 printf 'Tunnel service account: %s\n' "$TUNNEL_USER"
 printf 'Workspace: %s\n' "$ROOT/workspace"
+printf 'Tunnel credentials: entered at the terminal when scripts/up.sh starts; not saved by the dashboard\n'
 printf '\nNext: run %s/scripts/up.sh\n' "$ROOT"
