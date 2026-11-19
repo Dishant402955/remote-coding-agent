@@ -3,6 +3,9 @@
 set -Eeuo pipefail
 umask 077
 
+# Never retain descriptors owned by the foreground launcher.
+exec 9>&-
+
 TUNNEL_CLIENT="${1:?usage: tunnel-client-supervisor.sh CLIENT MCP_URL STATUS_LOG TTL HEALTH_URL}"
 MCP_SERVER_URL="${2:?MCP URL is required}"
 LOG_FILE="${3:?supervisor status log is required}"
