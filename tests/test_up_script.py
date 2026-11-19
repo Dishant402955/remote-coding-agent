@@ -28,7 +28,9 @@ def test_dashboard_and_server_have_independent_process_groups() -> None:
     assert 'run_tunnel_client_as_service_user 9>&- &' in script
     assert 'exec > >(tee -a "$LIVE_LOG" 9>&-) 2>&1' in script
     server_supervisor = (ROOT / "scripts" / "server-supervisor.sh").read_text(encoding="utf-8")
-    tunnel_supervisor = (ROOT / "scripts" / "tunnel-client-supervisor.sh").read_text(encoding="utf-8")
+    tunnel_supervisor = (ROOT / "scripts" / "tunnel-client-supervisor.sh").read_text(
+        encoding="utf-8"
+    )
     assert "exec 9>&-" in server_supervisor
     assert "exec 9>&-" in tunnel_supervisor
     assert "setsid bash -o pipefail -c" in server_supervisor
