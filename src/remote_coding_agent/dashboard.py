@@ -1,6 +1,5 @@
+ # ruff: noqa: E501  # Embedded dashboard HTML/CSS/JS is intentionally kept inline.
 """Command-history dashboard with real-time command details."""
-
-# ruff: noqa: E501  # Embedded dashboard HTML/CSS/JS is intentionally kept inline.
 
 from __future__ import annotations
 
