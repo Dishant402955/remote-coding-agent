@@ -1,5 +1,7 @@
 """Minimal localhost dashboard that streams the live launcher log."""
 
+# ruff: noqa: E501  # The embedded HTML/CSS/JS is intentionally kept in one static string.
+
 from __future__ import annotations
 
 import argparse
@@ -92,7 +94,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/":
-            body = PAGE.encode("utf-8")
+            body = PAGE.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
