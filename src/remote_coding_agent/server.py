@@ -275,7 +275,12 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
                     else "failed"
                 ),
                 "timed_out": bool(result.get("timed_out")),
-                "stdout": _redact_sensitive_text(str(result.get("stdout", ""))),\n                "stderr": _redact_sensitive_text(str(result.get("stderr", ""))),\n                "output_truncated": bool(result.get("output_truncated")),\n                "command": _redact_sensitive_text(command) if isinstance(command, str) else preview,\n                "cwd": requested_cwd,\n                "timeout_seconds": timeout,
+                "stdout": _redact_sensitive_text(str(result.get("stdout", ""))),
+                "stderr": _redact_sensitive_text(str(result.get("stderr", ""))),
+                "output_truncated": bool(result.get("output_truncated")),
+                "command": _redact_sensitive_text(command) if isinstance(command, str) else preview,
+                "cwd": requested_cwd,
+                "timeout_seconds": timeout,
             })
             logger.info(
                 "TOOL END id=%s name=run_command exit_code=%s timed_out=%s "
