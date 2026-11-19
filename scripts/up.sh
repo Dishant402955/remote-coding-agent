@@ -33,7 +33,7 @@ STATE_DIR="${REMOTE_CODING_AGENT_STATE_DIR:-$HOME/.local/state/remote-coding-age
 LIVE_LOG="$STATE_DIR/live.log"
 DASHBOARD_LOG="/tmp/remote-coding-agent-dashboard.log"
 SESSION_FILE="$STATE_DIR/agent-session.json"
-SESSION_HISTORY_FILE="$STATE_DIR/session-history.jsonl"
+SESSION_HISTORY_FILE="$STATE_DIR/session-history.jsonl"\nCONTROL_PLANE_CONNECTED_FILE="$STATE_DIR/control-plane-connected"
 SESSION_ID=""
 STOP_FILE="$STATE_DIR/stop-requested"
 SESSION_STARTED_AT=""
@@ -376,7 +376,7 @@ done
   die "Tunnel did not become ready within ${startup_timeout}s. Check tunnel ID, key permissions, and workspace association."
 }
 
-status RUNNING "MCP server and Secure MCP Tunnel are healthy"
+date -u +%Y-%m-%dT%H:%M:%S.%NZ > "$CONTROL_PLANE_CONNECTED_FILE"\nchmod 600 "$CONTROL_PLANE_CONNECTED_FILE"\nstatus RUNNING "MCP server and Secure MCP Tunnel are healthy"
 write_session_state "running"
 printf 'Dashboard: http://127.0.0.1:%s\n' "$DASHBOARD_PORT"
 printf 'Console stays attached. Detach tmux with Ctrl+B, then D.\n'
