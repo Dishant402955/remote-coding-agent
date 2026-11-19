@@ -1,6 +1,6 @@
 # Adversarial Reliability Review
 
-**Review date:** 2026-11-16
+**Review date:** 2026-11-19
 **Scope:** native Ubuntu launcher, MCP server, shell-command executor, Secure MCP Tunnel supervisor, bootstrap, logging, and seven-day operating profile.
 
 This review is based on the source in this repository, the local test suite, and isolated process tests. It does not claim that the target machine has completed a seven-day soak. The current running deployment was not stopped or restarted during this review.
@@ -70,6 +70,14 @@ This review is based on the source in this repository, the local test suite, and
 **Finding and fix:** `up.sh` takes a per-user `flock` lock and separately checks the dedicated tunnel account and selected ports before startup. The one-shot bootstrap verifies Ubuntu/architecture, repository URL and branch, required executable files, and refuses to overwrite an existing project directory or attach to an existing `remote-agent` tmux session. The Ubuntu installer installs the tunnel supervisor under a root-owned path and reuses the validated locked service account.
 
 **Evidence:** static review of `scripts/up.sh`, `scripts/setup-ubuntu.sh`, and `bootstrap/setup-remote-coding-agent.sh`, plus shell syntax validation. The bootstrap intentionally requires the operator to stop the old agent and remove/move the old project directory first.
+
+### Pass 9: foreground Ctrl+C, descriptor inheritance, and orphaned log forwarders
+
+**Attack:** press Ctrl+C while the native launcher is active, then immediately start it again; inspect every surviving process and the single-instance lock descriptor.
+
+**Finding and fix:** the launcher log-forwarding tee now closes the launcher's lock descriptor. Both supervisors defensively close that descriptor on entry. The MCP server and its tee are launched through one dedicated process-group wrapper instead of Bash process substitution, so the supervisor can terminate and reap the complete group. The existing launcher shutdown path sends TERM first, waits for supervisor cleanup, and escalates to KILL after a bounded grace period.
+
+**Evidence:** `test_server_supervisor_closes_inherited_lock_fd_and_reaps_process_group`, `test_dashboard_and_server_have_independent_process_groups`, and `test_interrupt_signals_exit_with_shell_signal_statuses`. These tests cover local process behavior; the final Ctrl+C qualification must still be performed on the target Ubuntu host after deployment.
 
 ## Console and log contract
 
