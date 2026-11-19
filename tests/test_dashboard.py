@@ -13,7 +13,9 @@ def test_dashboard_is_a_command_history_viewer() -> None:
     assert "background:#f5f7fb" in dashboard.PAGE
 
 
-def test_history_events_merge_updates_and_filter_before_control_plane(\n    tmp_path: Path, monkeypatch\n) -> None:
+def test_history_events_merge_updates_and_filter_before_control_plane(
+    tmp_path: Path, monkeypatch
+) -> None:
     history = tmp_path / "command-history.jsonl"
     connected = tmp_path / "control-plane-connected"
     connected.touch()
