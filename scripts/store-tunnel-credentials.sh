@@ -49,7 +49,9 @@ print(json.dumps({"tunnel_id": tunnel_id, "api_key": api_key}, separators=(",", 
 PY
     ;;
   write)
-    python3 - "$TARGET" <<'PY'
+    # Use -c instead of a here-document: stdin must remain available for the
+    # JSON payload piped by the dashboard.
+    python3 -c '
 import json
 import os
 import sys
@@ -101,7 +103,7 @@ try:
 finally:
     if os.path.exists(temp_path):
         os.unlink(temp_path)
-PY
+' "$TARGET"
     ;;
   *)
     printf 'Usage: %s {check|read|write}\n' "$0" >&2
