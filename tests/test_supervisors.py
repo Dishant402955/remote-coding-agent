@@ -73,11 +73,11 @@ def test_server_supervisor_closes_inherited_lock_fd_and_reaps_process_group(
     fd_marker = tmp_path / "lock-fd-inherited"
     child = tmp_path / "child.py"
     child.write_text(
-        "import os,pathlib,subprocess,time\\n"
-        f"pathlib.Path({str(fd_marker)!r}).write_text(str(os.path.exists('/proc/self/fd/9')))\\n"
-        f"p=pathlib.Path({str(child_pid_file)!r})\\n"
-        "p.write_text(str(subprocess.Popen(['sleep','60']).pid))\\n"
-        "time.sleep(60)\\n",
+        "import os,pathlib,subprocess,time\n"
+        f"pathlib.Path({str(fd_marker)!r}).write_text(str(os.path.exists('/proc/self/fd/9')))\n"
+        f"p=pathlib.Path({str(child_pid_file)!r})\n"
+        "p.write_text(str(subprocess.Popen(['sleep','60']).pid))\n"
+        "time.sleep(60)\n",
         encoding="utf-8",
     )
     log = tmp_path / "server.log"
