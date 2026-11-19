@@ -180,7 +180,7 @@ exec > >(tee -a "$LIVE_LOG") 2>&1
 SESSION_STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 SESSION_ID="$(date -u '+%Y%m%dT%H%M%SZ')-${BASHPID}"
 write_session_state "starting"
- : > "$DASHBOARD_LOG"
+: > "$DASHBOARD_LOG"
 chmod 600 "$DASHBOARD_LOG"
 env REMOTE_CODING_AGENT_STATE_DIR="$STATE_DIR" \
   REMOTE_CODING_AGENT_LIVE_LOG_FILE="$LIVE_LOG" \
