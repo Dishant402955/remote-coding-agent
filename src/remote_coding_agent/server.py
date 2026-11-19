@@ -75,7 +75,7 @@ def _redact_sensitive_text(value: str) -> str:
     """Redact common inline credentials before command/output history is persisted."""
     redacted = value
     for pattern in _REDACTION_PATTERNS:
-        redacted = pattern.sub(r"\\1[REDACTED]", redacted)
+        redacted = pattern.sub(r"\1[REDACTED]", redacted)
     return redacted
 
 
@@ -274,7 +274,8 @@ def create_server(settings: Settings) -> tuple[FastMCP, Any]:
                     if result.get("exit_code") == 0 and not result.get("timed_out")
                     else "failed"
                 ),
-                "timed_out": bool(result.get("timed_out")),\n                "stdout": _redact_sensitive_text(str(result.get("stdout", ""))),\n                "stderr": _redact_sensitive_text(str(result.get("stderr", ""))),\n                "output_truncated": bool(result.get("output_truncated")),\n                "command": _redact_sensitive_text(command) if isinstance(command, str) else preview,\n                "cwd": requested_cwd,\n                "timeout_seconds": timeout,
+                "timed_out": bool(result.get("timed_out")),
+                "stdout": _redact_sensitive_text(str(result.get("stdout", ""))),\n                "stderr": _redact_sensitive_text(str(result.get("stderr", ""))),\n                "output_truncated": bool(result.get("output_truncated")),\n                "command": _redact_sensitive_text(command) if isinstance(command, str) else preview,\n                "cwd": requested_cwd,\n                "timeout_seconds": timeout,
             })
             logger.info(
                 "TOOL END id=%s name=run_command exit_code=%s timed_out=%s "
