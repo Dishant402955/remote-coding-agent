@@ -116,9 +116,11 @@ def _store_tunnel_credentials(tunnel_id: str, api_key: str) -> None:
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError("Could not securely store tunnel credentials") from exc
     if result.returncode != 0:
-        raise RuntimeError(
-            "Could not securely store tunnel credentials; rerun setup-ubuntu.sh"
-        )
+        # Surface the helper's actionable diagnostic (for example, sudoers or
+        # directory ownership) instead of sending users in a blind reinstall loop.
+        detail = (result.stderr or result.stdout or "").strip()
+        detail = detail[:400] if detail else f"helper exited with status {result.returncode}"
+        raise RuntimeError(f"Could not securely store tunnel credentials: {detail}")
 
 
 def _read_tunnel_credentials() -> dict[str, str]:
