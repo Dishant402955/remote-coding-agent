@@ -8,8 +8,6 @@ PROJECT_PARENT="${REMOTE_CODING_AGENT_PROJECT_PARENT:-$HOME/projects}"
 PROJECT_DIR="${REMOTE_CODING_AGENT_PROJECT_DIR:-$PROJECT_PARENT/remote-coding-agent}"
 BRANCH="main"
 SESSION_NAME="${REMOTE_CODING_AGENT_TMUX_SESSION:-remote-agent}"
-TUNNEL_USER="remote-coding-agent-tunnel"
-CREDENTIAL_HELPER="/usr/local/lib/remote-coding-agent/store-tunnel-credentials.sh"
 
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
